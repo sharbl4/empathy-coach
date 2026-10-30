@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import type { InjectOptions } from 'fastify';
 import { Pool } from 'pg';
 import { createApp } from '../src/app.js';
 import { migrate } from '../src/db/migrate.js';
@@ -25,7 +26,7 @@ test('production refuses injected Auth',async()=>{
 test('storage: migrations, two owners, revisions, cursor, persistence, cascade', {skip:!database&&'Set TEST_DATABASE_URL to run real PostgreSQL integration'},async()=>{
   const pool=testPool();
   const unlock=await databaseSuiteLock(database!);
-  const owners=[randomUUID(),randomUUID()];
+  const owners:string[]=[randomUUID(),randomUUID()];
   const old=process.env.NODE_ENV;process.env.NODE_ENV='test';
   await migrate(pool);await migrate(pool);
   const app=await createApp({pool,provider:{analyze:async()=>Analysis.parse(outputFixtures.analysis)},auth:{verify:async token=>{
@@ -34,7 +35,7 @@ test('storage: migrations, two owners, revisions, cursor, persistence, cascade',
     return token;
   }}});
   const input={title:'Проверка',situation:{message:'Давай завтра',relationship:'Коллега',context:'',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}};
-  const request=async(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner=owners[0],payload?:unknown)=>{
+  const request=async(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner:string=owners[0],payload?:InjectOptions['payload'])=>{
     const response=await app.inject({method,url,headers:{authorization:`Bearer ${owner}`},payload});
     if(response.statusCode>=400)ApiError.parse(response.json());
     return response;

@@ -92,10 +92,13 @@ export class Storage {
       await client.query('DELETE FROM app.sessions WHERE id=$1 AND user_id=$2',[id,userId]);
     });
   }
-  async clear(userId:string) {
-    await transaction(this.pool,async client=>{
+  async clear(userId:string,onDeleted?:(runIds:string[])=>void) {
+    const ids=await transaction(this.pool,async client=>{
       await client.query('SELECT id FROM app.profiles WHERE id=$1 FOR UPDATE',[userId]);
+      const runs=await client.query<{id:string}>('SELECT id FROM app.ai_runs WHERE user_id=$1',[userId]);
       await client.query('DELETE FROM app.sessions WHERE user_id=$1',[userId]);
+      return runs.rows.map(row=>row.id);
     });
+    onDeleted?.(ids);
   }
 }

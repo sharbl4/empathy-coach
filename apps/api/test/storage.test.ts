@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import type { InjectOptions } from 'fastify';
 import { Pool } from 'pg';
 import { createApp } from '../src/app.js';
 import { migrate } from '../src/db/migrate.js';
 import { HttpError } from '../src/errors.js';
-import { ApiError } from '@between/contracts';
+import { ApiError, Analysis } from '@between/contracts';
+import { databaseSuiteLock } from './database.js';
+import { outputFixtures } from '@between/contracts/fixtures';
 
 const database=process.env.TEST_DATABASE_URL;
 // Opt-in only: test DB name and a URL distinct from the deployed connection are mandatory.
@@ -22,16 +25,17 @@ test('production refuses injected Auth',async()=>{
 });
 test('storage: migrations, two owners, revisions, cursor, persistence, cascade', {skip:!database&&'Set TEST_DATABASE_URL to run real PostgreSQL integration'},async()=>{
   const pool=testPool();
-  const owners=[randomUUID(),randomUUID()];
+  const unlock=await databaseSuiteLock(database!);
+  const owners:string[]=[randomUUID(),randomUUID()];
   const old=process.env.NODE_ENV;process.env.NODE_ENV='test';
   await migrate(pool);await migrate(pool);
-  const app=await createApp({pool,auth:{verify:async token=>{
+  const app=await createApp({pool,provider:{analyze:async()=>Analysis.parse(outputFixtures.analysis)},auth:{verify:async token=>{
     if(token==='down')throw new HttpError(503,'DEPENDENCY_UNAVAILABLE','Auth недоступен');
     if(!owners.includes(token))throw new HttpError(401,'UNAUTHORIZED','Неверный токен');
     return token;
   }}});
   const input={title:'Проверка',situation:{message:'Давай завтра',relationship:'Коллега',context:'',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}};
-  const request=async(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner=owners[0],payload?:unknown)=>{
+  const request=async(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner:string=owners[0],payload?:InjectOptions['payload'])=>{
     const response=await app.inject({method,url,headers:{authorization:`Bearer ${owner}`},payload});
     if(response.statusCode>=400)ApiError.parse(response.json());
     return response;
@@ -45,10 +49,25 @@ test('storage: migrations, two owners, revisions, cursor, persistence, cascade',
     assert.equal((await request('POST','/api/sessions',owners[0],{...input,userId:owners[1]})).statusCode,400);
     const created=await request('POST','/api/sessions',owners[0],input);assert.equal(created.statusCode,201);
     const id=created.json().id;
+    const key=randomUUID();
+    const analyze=()=>app.inject({method:'POST',url:`/api/sessions/${id}/analyze`,headers:{authorization:`Bearer ${owners[0]}`,'idempotency-key':key},payload:{expectedRevision:1}});
+    const accepted=await analyze();assert.equal(accepted.statusCode,202);const runId=accepted.json().runId;
+    for(let i=0;i<100;i++){
+      const run=await request('GET',`/api/runs/${runId}`);
+      assert.equal(run.statusCode,200);
+      if(run.json().status==='succeeded')break;
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.equal((await request('GET',`/api/runs/${runId}`)).json().status,'succeeded');
+    assert.equal((await request('GET',`/api/runs/${runId}`,owners[1])).statusCode,404);
+    assert.equal((await analyze()).json().runId,runId);
+    assert.equal((await request('GET',`/api/sessions/${id}`)).json().runs.length,1);
     for(const method of ['GET','PATCH','DELETE'] as const)assert.equal((await request(method,`/api/sessions/${id}`,owners[1],method==='PATCH'?{...input,expectedRevision:1}:undefined)).statusCode,404);
     const updates=await Promise.all([1,2].map(i=>request('PATCH',`/api/sessions/${id}`,owners[0],{...input,title:`Новое ${i}`,expectedRevision:1})));
     assert.deepEqual(updates.map(r=>r.statusCode).sort(),[200,409]);
     assert.equal((await request('GET',`/api/sessions/${id}`)).json().revision,2);
+    assert.equal((await request('GET',`/api/sessions/${id}`)).json().runs.length,0);
+    assert.equal((await request('GET',`/api/runs/${runId}`)).statusCode,409);
     const fresh=new Pool({connectionString:database});
     try{assert.equal((await fresh.query('SELECT revision FROM app.sessions WHERE id=$1',[id])).rows[0].revision,2);}finally{await fresh.end();}
     await request('POST','/api/sessions',owners[0],input);
@@ -69,6 +88,6 @@ test('storage: migrations, two owners, revisions, cursor, persistence, cascade',
   } finally {
     await pool.query('DELETE FROM app.sessions WHERE user_id=ANY($1::uuid[])',[owners]);
     await pool.query('DELETE FROM app.profiles WHERE id=ANY($1::uuid[])',[owners]);
-    await app.close();process.env.NODE_ENV=old;
+    await app.close();await unlock();process.env.NODE_ENV=old;
   }
 });

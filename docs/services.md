@@ -62,6 +62,10 @@ app не добавлять в exposed schemas Data API; клиентским р
 
 ## Команды team lead и границы результата
 
+Для Node 24.22.1 корневые команды services:check/checkpoint:live/dev/start загружают .env в launcher и запускают приложение дочерним Node-процессом. Это гарантирует, что NODE_EXTRA_CA_CERTS известен до инициализации TLS. На этой Windows-машине одного `node --env-file=.env` оказалось недостаточно для CA: воспроизведён SELF_SIGNED_CERT_IN_CHAIN.
+Для GigaChat скачан официальный PEM из https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt по проверенному HTTPS. Файл находится в игнорируемой .tools; абсолютный локальный путь записан в NODE_EXTRA_CA_CERTS. Системное хранилище не менялось, TLS-проверка включена. На другом checkout CA надо получить самостоятельно по [официальной инструкции](https://developers.sber.ru/docs/ru/gigachat/certificates); в контейнере использовать свой путь/mount, не Windows-путь из dev env.
+Для повторной загрузки в PowerShell: `Invoke-WebRequest -Uri 'https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt' -OutFile '.tools/russian_trusted_root_ca_pem.crt'`. Каталог .tools создать, если отсутствует. Проверить, что это X.509 CA с CN Russian Trusted Root CA и актуальным сроком. SHA256 текущего проверенного сертификата: D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31. При обновлении сертификата сверять официальный источник, не применять старый fingerprint вслепую.
+
 ```sh
 npm run services:check
 # После merged API migrations/Auth/runs и заполнения env:
@@ -88,3 +92,16 @@ CI включает миграцию runtime-БД перед E2E/контейн�
 Lint/typecheck и 10 тестов прошли, включая отсутствие утечки секретов и отказ запускать live-проверку без явной конфигурации.
 services:check: PostgreSQL OK; Supabase/GigaChat BLOCKED. checkpoint:live: BLOCKED до HTTP-запросов. Это не live PASS.
 Синтаксис compose.staging.yaml проверен через config --quiet с заведомо тестовыми значениями, публикация не выполнялась.
+
+## Проверка подключённых сервисов 30.10.2026
+
+После заполнения env и настройки CA: PostgreSQL SELECT 1 OK; Supabase public settings OK (email provider, signups, email confirmation включены); публичные env web/api совпадают. GigaChat OAuth и /v1/models успешны. Проверка баланса вернула положительную квоту для Ultra; точные суммы, токены и ответы не сохраняются.
+Для первой live-проверки выбран и записан в локальный .env GIGACHAT_MODEL=GigaChat-3-Ultra. Модель присутствует в фактическом списке аккаунта; [официально поддерживает v1 и Freemium для физлиц](https://developers.sber.ru/docs/ru/gigachat/models/gigachat-3-ultra). Это не доказательство качества результата и принятия нашей JSON Schema: генерация в этой проверке не вызывалась.
+Backend-провайдер дважды выполнил access-check с настоящими сервисами: OAuth запрос был один, второй access-check использовал кеш; генераций 0. Автообновление токена по expiry покрыто отдельным тестом. После применения принятых миграций настоящий API запущен и остановлен локально: readiness 200, me без Bearer 401. Локально lint/typecheck/build и 29 тестов прошли, 0 skips. CHECKPOINT_EMAIL/PASSWORD пока отсутствуют; checkpoint не запускался.
+SMTP пользователем пока не настроен. До своего SMTP получать письма могут только участники организации Supabase, действует документированный лимит отправки. Реальные signup/confirmation/recovery пока не проверены.
+
+## Отдельный аккаунт для checkpoint
+
+Предпочтительный путь — зарегистрироваться через готовую форму приложения отдельным dev/test-адресом, подтвердить письмо и выйти. Пароль не должен совпадать с паролями кабинетов Supabase/Studio. Пока SMTP нет, адрес должен принадлежать участнику организации Supabase; GitHub membership этого не заменяет. Для полностью отдельного почтового адреса сначала настроить SMTP либо включить этот адрес в разрешённую команду Supabase с учётом её правил/тарифа.
+Если UI ещё на review, для проверки исключительно API допустим отдельный пользователь через Authentication → Users → Add user в dev-проекте. Такой административно подтверждённый аккаунт нельзя засчитывать как проверку реальной регистрации/доставки письма. Приёмка signup/confirmation/recovery всё равно выполняется отдельно через UI.
+Записать аккаунт только локально: CHECKPOINT_EMAIL и CHECKPOINT_PASSWORD; CHECKPOINT_ORIGIN=http://localhost:3000. CHECKPOINT_LIVE пока оставить 0. После готовности аккаунта/сервера lead сообщает о единственном вызове генерации, затем явно включает CHECKPOINT_LIVE=1 на время контрольного запуска. Ключи/пароль/Access token в чат не отправляются. Access token GigaChat пользователь не заполняет: backend получает, кеширует и обновляет его автоматически.

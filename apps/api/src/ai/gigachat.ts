@@ -38,7 +38,7 @@ export class GigaChatProvider implements AiProvider {
       });
       if(!response.ok)throw new ModelError(response.status===400||response.status===401||response.status===403?'CONFIGURATION_ERROR':'MODEL_UNAVAILABLE');
       const data=await response.json() as {access_token?:unknown;expires_at?:unknown};
-      if(typeof data.access_token!=='string'||!data.access_token||typeof data.expires_at!=='number'||data.expires_at<=this.now()+1000)throw new ModelError('CONFIGURATION_ERROR');
+      if(!data||typeof data.access_token!=='string'||!data.access_token||typeof data.expires_at!=='number'||data.expires_at<=this.now()+1000)throw new ModelError('CONFIGURATION_ERROR');
       this.token={value:data.access_token,expires:data.expires_at};return data.access_token;
     })();
     try{return await this.refreshing;}finally{this.refreshing=undefined;}
@@ -76,6 +76,7 @@ export class GigaChatProvider implements AiProvider {
       }
       let data:{choices?:Array<{finish_reason?:string;message?:{content?:string;refusal?:unknown}}>};
       try{data=await response.json();}catch{throw new ModelError('MODEL_INVALID_OUTPUT');}
+      if(!data||!Array.isArray(data.choices))throw new ModelError('MODEL_INVALID_OUTPUT');
       const choice=data.choices?.[0];
       if(choice?.message?.refusal||choice?.finish_reason==='blacklist')throw new ModelError('MODEL_REFUSED');
       if(choice?.finish_reason!=='stop'||typeof choice.message?.content!=='string')throw new ModelError('MODEL_INVALID_OUTPUT');
@@ -122,7 +123,7 @@ export class GigaChatProvider implements AiProvider {
     return this.validate(()=>finish?outputs.roleplay_feedback.parse(value):outputs.roleplay_start.parse(value));
   }
   async roleplayFinish(input:RoleplayContext,signal:AbortSignal) {
-    const value=await this.generate('roleplay_feedback','Пользователь завершил тренировку раньше. Дай итог kind=feedback по фактическим репликам: сильные стороны, улучшения и следующую практику. Не придумывай непройденные ходы.',input,signal);
+    const value=await this.generate('roleplay_feedback','Пользователь завершил тренировку. Дай итог kind=feedback по фактическим репликам: сильные стороны, улучшения и следующую практику. Не придумывай непройденные ходы.',input,signal);
     return this.validate(()=>outputs.roleplay_feedback.parse(value));
   }
 }

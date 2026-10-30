@@ -121,9 +121,10 @@ export class Runs {
     const row=(await client.query('SELECT session_id FROM app.roleplays WHERE id=$1 AND user_id=$2',[id,userId])).rows[0];
     if(!row)throw notFound();return row.session_id as string;
   }
-  private async assertLastSucceeded(client:PoolClient,role:RoleRow) {
-    const row=(await client.query('SELECT status FROM app.ai_runs WHERE id=$1 AND user_id=$2 AND session_id=$3 AND revision=$4',[role.last_run_id,role.user_id,role.session_id,role.revision])).rows[0];
-    if(row?.status!=='succeeded')throw conflict('Сначала повторите неудавшуюся генерацию диалога');
+  private async assertLastSucceeded(client:PoolClient,role:RoleRow,earlyFinish=false) {
+    const row=(await client.query('SELECT status,kind FROM app.ai_runs WHERE id=$1 AND user_id=$2 AND session_id=$3 AND revision=$4',[role.last_run_id,role.user_id,role.session_id,role.revision])).rows[0];
+    const stoppingFailedTurn=earlyFinish&&role.turn_count>0&&role.turn_count<3&&row?.status==='failed'&&row.kind==='roleplay_turn';
+    if(row?.status!=='succeeded'&&!stoppingFailedTurn)throw conflict('Сначала повторите неудавшуюся генерацию диалога');
   }
   roleplayTurn(userId:string,roleplayId:string,body:RequestFor<'roleplayTurn'>,key:string) {
     return this.submit(userId,key,`/api/roleplays/${roleplayId}/turns`,body,client=>this.roleSession(client,userId,roleplayId),async(client,session)=>{
@@ -137,7 +138,7 @@ export class Runs {
   }
   roleplayFinish(userId:string,roleplayId:string,body:RequestFor<'roleplayFinish'>,key:string) {
     return this.submit(userId,key,`/api/roleplays/${roleplayId}/finish`,body,client=>this.roleSession(client,userId,roleplayId),async(client,session)=>{
-      const role=await this.role(client,userId,roleplayId,session);await this.assertLastSucceeded(client,role);
+      const role=await this.role(client,userId,roleplayId,session);await this.assertLastSucceeded(client,role,true);
       if(role.turn_count<1)throw conflict('Для итога нужен хотя бы один ответ');
       return {kind:'roleplay_feedback',roleplayId,context:await this.roleContext(client,userId,session,role)};
     });

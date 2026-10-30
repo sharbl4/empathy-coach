@@ -16,7 +16,7 @@ const options={skip:!database&&'Requires separate PostgreSQL test DB'};
 type Kind=RunDto['kind'];
 async function harness(){
   if(!database||!/test/.test(new URL(database).pathname)||database===process.env.DATABASE_URL||process.env.NODE_ENV!=='test')throw new Error('Unsafe DB');
-  const unlock=await databaseSuiteLock(database),pool=new Pool({connectionString:database});await migrate(pool);
+  const unlock=await databaseSuiteLock(database);let pool=new Pool({connectionString:database});await migrate(pool);
   const owners:string[]=[randomUUID(),randomUUID()];
   const calls:Array<{kind:Kind;context:unknown}>=[];
   const fail=new Set<Kind>(),invalid=new Set<Kind>();
@@ -38,7 +38,7 @@ async function harness(){
     roleplayTurn:async input=>input.turnCount===3?outputs.roleplay_feedback.parse(await answer('roleplay_feedback',input)):outputs.roleplay_turn.parse(await answer('roleplay_turn',input)),
     roleplayFinish:async input=>outputs.roleplay_feedback.parse(await answer('roleplay_feedback',input))
   };
-  const app=await createApp({pool,provider,auth:{verify:async token=>token}});
+  let app=await createApp({pool,provider,auth:{verify:async token=>token}});
   const call=async(method:'GET'|'POST'|'PATCH'|'DELETE',path:string,payload?:InjectOptions['payload'],owner=owners[0],key?:string)=>{
     const response=await app.inject({method,url:path,headers:{authorization:`Bearer ${owner}`,...(key?{'idempotency-key':key}:{})},payload});
     if(response.statusCode>=400)ApiError.parse(response.json());return response;
@@ -61,6 +61,7 @@ async function harness(){
   const detail=async(id:string)=>SessionDetail.parse((await call('GET',`/api/sessions/${id}`)).json());
   const progress=async()=>Progress.parse((await call('GET','/api/progress')).json());
   return {pool,app,owners,calls,fail,invalid,call,post,wait,session,analyze,detail,progress,
+    restart:async()=>{await app.close();pool=new Pool({connectionString:database});app=await createApp({pool,provider,auth:{verify:async token=>token}});await app.ready();},
     defer:(kind:Kind)=>{defer=kind;},release:()=>{release?.(outputFixtures[defer!]);defer=undefined;},
     close:async()=>{
       release?.(outputFixtures[defer??'analysis']);
@@ -168,5 +169,53 @@ test('learning references are owner/revision scoped and cancelled work cannot re
     assert.equal((await h.call('GET','/api/sessions')).json().items.length,0);
     const stats=await h.progress();assert.equal(stats.analyzedSessions+stats.completedExercises+stats.completedRoleplays,0);
     assert.equal((await h.call('GET','/api/progress',undefined,h.owners[1])).json().analyzedSessions,1);
+  }finally{await h.close();}
+});
+
+test('failed third turn survives restart and retry produces one final result without a fourth user turn',options,async()=>{
+  const h=await harness();
+  try {
+    const session=await h.session();await h.analyze(session.id);
+    const start=await h.post(`/api/sessions/${session.id}/roleplays`);await h.wait(start.runId);
+    const path=`/api/roleplays/${start.resourceId}`;
+    await h.wait((await h.post(`${path}/turns`,{content:'Уточню время.'})).runId);
+    await h.wait((await h.post(`${path}/turns`,{content:'Мне подходит.'})).runId);
+    h.fail.add('roleplay_feedback');const third=await h.post(`${path}/turns`,{content:'Спасибо, договорились.'});await h.wait(third.runId,'failed');
+    const calls=h.calls.length;
+    await h.restart();assert.equal(h.calls.length,calls);
+    const before=(await h.detail(session.id)).roleplays[0];assert.equal(before.status,'active');assert.equal(before.turnCount,3);assert.equal(before.messages.filter(x=>x.role==='user').length,3);
+    assert.equal((await h.call('POST',`${path}/turns`,{expectedRevision:1,content:'Лишний ход'},h.owners[0],randomUUID())).statusCode,409);
+    const key=randomUUID(),retry=await h.post(`/api/runs/${third.runId}/retry`,{},key);await h.wait(retry.runId);
+    assert.equal((await h.post(`/api/runs/${third.runId}/retry`,{},key)).runId,retry.runId);
+    const final=(await h.detail(session.id)).roleplays[0];assert.equal(final.status,'completed');assert.equal(final.messages.filter(x=>x.role==='user').length,3);
+    assert.equal(final.messages.length,6);assert.equal((await h.progress()).completedRoleplays,1);
+  }finally{await h.close();}
+});
+
+test('early finish can summarize a saved first answer after failed generation without replaying that turn',options,async()=>{
+  const h=await harness();
+  try {
+    const session=await h.session();await h.analyze(session.id);
+    const start=await h.post(`/api/sessions/${session.id}/roleplays`);await h.wait(start.runId);
+    const path=`/api/roleplays/${start.resourceId}`;
+    h.fail.add('roleplay_turn');const failed=await h.post(`${path}/turns`,{content:'Я хочу закончить после этого ответа.'});await h.wait(failed.runId,'failed');
+    await h.wait((await h.post(`${path}/finish`)).runId);
+    const role=(await h.detail(session.id)).roleplays[0];assert.equal(role.turnCount,1);assert.equal(role.status,'completed');assert.equal(role.messages.filter(x=>x.role==='user').length,1);
+    assert.equal((await h.call('POST',`/api/runs/${failed.runId}/retry`,{expectedRevision:1},h.owners[0],randomUUID())).statusCode,409);
+  }finally{await h.close();}
+});
+
+test('interrupted roleplay turn is not replayed at startup and can retry its persisted snapshot',options,async()=>{
+  const h=await harness();
+  try {
+    const session=await h.session();await h.analyze(session.id);
+    const start=await h.post(`/api/sessions/${session.id}/roleplays`);await h.wait(start.runId);
+    h.defer('roleplay_turn');const turn=await h.post(`/api/roleplays/${start.resourceId}/turns`,{content:'Сохранённый ответ.'});
+    const calls=h.calls.length;await h.restart();assert.equal(h.calls.length,calls);
+    assert.equal((await h.wait(turn.runId,'failed')).errorCode,'RUN_INTERRUPTED');
+    h.release();await new Promise(resolve=>setImmediate(resolve));
+    const retry=await h.post(`/api/runs/${turn.runId}/retry`);await h.wait(retry.runId);
+    const role=(await h.detail(session.id)).roleplays[0];assert.equal(role.turnCount,1);assert.equal(role.messages.filter(x=>x.role==='user').length,1);
+    assert.equal(role.messages.length,3);
   }finally{await h.close();}
 });

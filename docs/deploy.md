@@ -31,7 +31,7 @@ Reverse proxy обеспечивает HTTPS; /api/health/live для liveness, 
 | Recovery | проверить письмо, переход на allowlisted URL, update password и повторный вход |
 | GigaChat | credentials/scope/model/base URL не заданы; Дима проверяет официальный v1/v2 формат и первый live JSON |
 | Hosting | получить доступ и параметры от организаторов; публичная публикация пока заблокирована |
-| Приглашения | zar1xxx принял, push=true; приглашение D1nch1k активно/не просрочено |
+| Приглашения | zar1xxx и D1nch1k приняли, push=true у обоих; pending invitations нет |
 
 Не выводить значения env, токены и письма в отчёт. Проверка наличия SDK не подтверждает настроенный аккаунт или бюджет.
 

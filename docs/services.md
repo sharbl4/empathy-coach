@@ -7,8 +7,8 @@
 ## GitHub
 
 Private repo: https://github.com/sharbl4/empathy-coach.
-zar1xxx принял приглашение, GitHub подтверждает push=true. D1nch1k — активное приглашение write, expired=false на момент проверки.
-Диме открыть [приглашение](https://github.com/sharbl4/empathy-coach/invitations) под D1nch1k и принять. Обоим доступна страница [приглашений GitHub](https://github.com/notifications/invitations).
+zar1xxx и D1nch1k приняли приглашения, GitHub подтверждает push=true у обоих. Список ожидающих приглашений пуст.
+Обоим доступен clone; для будущих приглашений — [страница GitHub](https://github.com/notifications/invitations).
 Если кнопки нет, проверить текущий GitHub-аккаунт; Антон проверяет pending invitation, а не создаёт дубликат.
 Фактический clone/push со стороны Димы проверяется после принятия; приглашение само по себе этого не доказывает.
 
@@ -52,7 +52,7 @@ app не добавлять в exposed schemas Data API; клиентским р
 2. Проект → Настройки API → Получить ключ (нужна роль Владелец/Администратор). В GIGACHAT_CREDENTIALS записывается **готовая Base64-строка Authorization Key**, без префикса Basic и без повторного Base64. Не пароль, не client secret отдельно и не краткоживущий access token. Ключ показывается один раз: сохранить локально, не регенерировать используемый командой ключ без необходимости.
 3. GIGACHAT_SCOPE задаётся по выданному типу доступа: GIGACHAT_API_PERS — физлица; GIGACHAT_API_B2B — соответствующий пакет ИП/юрлица; GIGACHAT_API_CORP — соответствующий pay-as-you-go доступ. Не угадывать scope.
 4. Для нового подключения выбираем REST **v1**: GIGACHAT_BASE_URL=https://api.giga.chat/v1. Токен получается отдельно: POST https://ngw.devices.sberbank.ru:9443/api/v2/oauth. Headers: Authorization Basic из ключа, RqUID UUIDv4; body form-urlencoded scope. TLS проверяется. При необходимости добавить официальный доверенный CA через NODE_EXTRA_CA_CERTS в server runtime, не через NODE_TLS_REJECT_UNAUTHORIZED=0.
-5. GIGACHAT_MODEL — точное id из GET https://api.giga.chat/v1/models, доступное этому аккаунту. Команда services:check проверяет присутствие настроенной модели, но не печатает токен/ответ. Модель/расход подтверждает Дима первым коротким live-запросом.
+5. GIGACHAT_MODEL — точное id из GET https://api.giga.chat/v1/models, доступное этому аккаунту. После заполнения ключа/scope/base URL команда `npm run services:check -- --list-models` выводит только имена доступных моделей, без токена/сырого ответа и без генерации. Выбранное id записать в GIGACHAT_MODEL, затем выполнить обычный services:check. Модель/расход подтверждает Дима первым коротким live-запросом.
 6. AI_PROVIDER=gigachat. В v1 POST /chat/completions response_format находится на верхнем уровне: type=json_schema, schema из outputJsonSchema('analysis'), strict=true. v2 имеет другой envelope; его формат не смешивать с выбранным v1. Дима проверяет поддержку конкретной модели и строгого результата.
 7. Токен хранится в памяти, обновление single-flight до истечения. Дима проверяет единицы expires_at по фактическому контракту API/закреплённому SDK, не переносит расчёт по памяти от другого провайдера.
 8. Один generation/run; timeout/429/отказ/invalid JSON — безопасный failed run без сырого ответа в логах. Не повторять платный вызов автоматически после неизвестного исхода; для нового намерения новый Idempotency-Key. Настроить concurrency/лимиты по реальной квоте.
@@ -78,7 +78,8 @@ checkpoint:live: требует CHECKPOINT_LIVE=1, AI_PROVIDER=gigachat, DATABAS
 PR принимается после: diff в зоне автора; DTO из contracts; реальные проверки; нет секретов/log body; ownership всех ссылок и revision/idempotency проверяются сервером; миграции прогнаны на пустой отдельной БД; поведение отвечает acceptance.
 Любой ответ 2xx из mock/адаптера не засчитывается как live. Не merge при красном CI или недоказанной миграции, если PR заявляет DB-готовность.
 Контракт меняется отдельным явным решением Антона с обновлёнными фикстурами/docs, не попутно в PR участника.
-Сейчас открытых PR нет; отправлять сообщения участникам от имени Антона без отдельного поручения не требуется.
+Первый storage PR Димы #1 проверен на отдельной пустой PostgreSQL: миграции применены, но DB-тест упал (400 ожидается, 500 получен). Review требует установить общий error handler до регистрации дочерних storage routes и проверять ApiError envelope в тестах. До исправления PR остаётся draft, merge не выполнен.
+CI включает обязательные миграции пустой отдельной БД и DB-тесты при наличии src/db/migrate.ts. До появления этого файла выводится явная граница foundation, без заявления DB-готовности.
 
 ## Фактически проверено в этой итерации
 

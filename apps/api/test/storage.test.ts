@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import { createApp } from '../src/app.js';
 import { migrate } from '../src/db/migrate.js';
 import { HttpError } from '../src/errors.js';
+import { ApiError } from '@between/contracts';
 
 const database=process.env.TEST_DATABASE_URL;
 // Opt-in only: test DB name and a URL distinct from the deployed connection are mandatory.
@@ -30,7 +31,11 @@ test('storage: migrations, two owners, revisions, cursor, persistence, cascade',
     return token;
   }}});
   const input={title:'Проверка',situation:{message:'Давай завтра',relationship:'Коллега',context:'',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}};
-  const request=(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner=owners[0],payload?:unknown)=>app.inject({method,url,headers:{authorization:`Bearer ${owner}`},payload});
+  const request=async(method:'GET'|'POST'|'PATCH'|'DELETE',url:string,owner=owners[0],payload?:unknown)=>{
+    const response=await app.inject({method,url,headers:{authorization:`Bearer ${owner}`},payload});
+    if(response.statusCode>=400)ApiError.parse(response.json());
+    return response;
+  };
   try {
     assert.equal((await app.inject('/api/me')).statusCode,401);
     assert.equal((await request('GET','/api/me','bad')).statusCode,401);

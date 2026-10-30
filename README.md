@@ -39,3 +39,12 @@ docker run --rm --env-file .env -p 3000:3000 empathy-coach:foundation
 Подробности: [контракт](docs/api.md), [архитектура и SQL](docs/architecture.md), [приёмка](docs/acceptance.md), [деплой и доступы](docs/deploy.md), [передача](docs/handoff.md).
 
 Основной хостинг — облако организаторов. Публичный staging URL пока не предоставлен.
+
+В текущей Windows-папке Node скачан с nodejs.org и проверен по официальному SHA256; переносимая копия игнорируется Git. Для этой копии перед командами:
+
+```powershell
+$env:Path = "$PWD\.tools\node-v24.22.1-win-x64;$env:Path"
+npm.cmd run dev
+```
+
+В новом clone установите Node версии `.nvmrc`. Private GitHub: https://github.com/sharbl4/empathy-coach.

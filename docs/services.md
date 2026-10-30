@@ -15,7 +15,7 @@ zar1xxx и D1nch1k приняли приглашения, GitHub подтвер�
 ## Supabase: обязательные значения и действия
 
 1. Войти в Supabase Dashboard самостоятельно. Выбрать существующий dev-проект либо создать dev-проект в доступной организации после проверки тарифа/лимитов. Не менять чужой production-проект.
-2. В Project Settings → API Keys взять **publishable key**, не secret/service_role. URL проекта и publishable key записать в SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY; те же публичные значения — VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY. В браузере только эти публичные настройки; backend использует getUser(token).
+2. В Connect dialog взять URL проекта и **publishable key**, не secret/service_role; полный список ключей — Settings → API Keys. URL и ключ записать в SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY; те же публичные значения — VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY. В браузере только эти публичные настройки; backend использует getUser(token). [Расположение ключей](https://supabase.com/docs/guides/getting-started/api-keys).
 3. Authentication → Sign In / Providers → Email: provider enabled; Allow new users to sign up = ON; Confirm Email = ON. Anonymous sign-ins = OFF. Социальные провайдеры/ручное связывание для v1 не нужны. Подтверждение email не отключать ради обхода SMTP.
 4. Authentication → URL Configuration для отдельного dev-проекта:
 
@@ -40,7 +40,7 @@ Team lead фиксирует клиентские пути /auth/callback и /au
 ## PostgreSQL
 
 Локально: docker compose up -d db. Данные в pgdata, порт только на 127.0.0.1:5432. Dev DATABASE_URL из .env.example. Не выполнять down -v и не пересоздавать чужую БД.
-SELECT 1/readiness означает подключение, но не наличие app-таблиц. Мигратор и миграции пишет Дима. После его PR: npm run build → npm run db:migrate на пустой test-БД → повтор запуска мигратора → integration tests.
+SELECT 1/readiness означает подключение, но не наличие app-таблиц. Мигратор и миграции приняты в storage PR Димы. Проверка: npm run build → npm run db:migrate на пустой test-БД → повтор запуска мигратора → integration tests.
 Тестовая БД отдельная; тесты и seed не использовать с production DATABASE_URL.
 Если выбран Supabase PostgreSQL: взять строку из Connect. Для постоянного backend — direct при доступном IPv6; при IPv4-only — session pooler. Миграции требуют постоянной SQL-сессии/advisory lock; transaction pooler для этого не выбирать. Проверить TLS/CA, лимиты подключений и доступность из будущего контейнера; TLS не отключать.
 app не добавлять в exposed schemas Data API; клиентским ролям нет доступа к учебным таблицам. Конкретные GRANT/FK/индексы входят в review миграций Димы.
@@ -78,12 +78,13 @@ checkpoint:live: требует CHECKPOINT_LIVE=1, AI_PROVIDER=gigachat, DATABAS
 PR принимается после: diff в зоне автора; DTO из contracts; реальные проверки; нет секретов/log body; ownership всех ссылок и revision/idempotency проверяются сервером; миграции прогнаны на пустой отдельной БД; поведение отвечает acceptance.
 Любой ответ 2xx из mock/адаптера не засчитывается как live. Не merge при красном CI или недоказанной миграции, если PR заявляет DB-готовность.
 Контракт меняется отдельным явным решением Антона с обновлёнными фикстурами/docs, не попутно в PR участника.
-Первый storage PR Димы #1 проверен на отдельной пустой PostgreSQL: миграции применены, но DB-тест упал (400 ожидается, 500 получен). Review требует установить общий error handler до регистрации дочерних storage routes и проверять ApiError envelope в тестах. До исправления PR остаётся draft, merge не выполнен.
-CI включает обязательные миграции пустой отдельной БД и DB-тесты при наличии src/db/migrate.ts. До появления этого файла выводится явная граница foundation, без заявления DB-готовности.
+Storage PR Димы #1: initial DB-test выявил 500 вместо 400 и неправильный envelope. Дима исправил порядок error handler и добавил ApiError assertions; повторная локальная проверка и CI с реальными миграциями/DB-тестами прошли, PR принят в main (`5d8ac861dcbccc77117d34fd599bdfe8ddd832cd`).
+В PR #4 runs/GigaChat воспроизведён обход concurrency caps через bulk delete на head 1507e06: три незавершённые генерации при лимите 1. Отправлен request changes; merge требует проверки исправленного head и зелёного CI. Внешний live-путь ещё не пройден.
+CI включает миграцию runtime-БД перед E2E/контейнером, миграции пустой отдельной БД дважды и реальные DB-тесты при наличии src/db/migrate.ts. До появления этого файла выводится явная граница foundation, без заявления DB-готовности.
 
 ## Фактически проверено в этой итерации
 
-Локальный Docker Desktop запущен; compose PostgreSQL healthy, SELECT 1 успешен. app.sessions отсутствует. Корневой .env создан из шаблона и игнорируется Git; внешние ключи пока не заполнены.
+Локальный Docker Desktop запущен; compose PostgreSQL healthy, SELECT 1 успешен. После принятия PR #1 миграции dev-БД применены дважды, app.sessions существует. Корневой .env создан из шаблона и игнорируется Git; внешние ключи пользователь настраивает вручную.
 Lint/typecheck и 10 тестов прошли, включая отсутствие утечки секретов и отказ запускать live-проверку без явной конфигурации.
 services:check: PostgreSQL OK; Supabase/GigaChat BLOCKED. checkpoint:live: BLOCKED до HTTP-запросов. Это не live PASS.
 Синтаксис compose.staging.yaml проверен через config --quiet с заведомо тестовыми значениями, публикация не выполнялась.

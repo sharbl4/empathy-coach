@@ -1,7 +1,7 @@
 # Между строк
 
 Foundation v0.1.0 для полной v1 по [hackathon-prompts.md](hackathon-prompts.md).
-Это запускаемый технический каркас; продуктовые Auth/CRUD/AI/практика пока не реализованы.
+Приняты foundation и серверное хранение: Supabase token verification, PostgreSQL-миграции, профиль и owned session CRUD. Веб-аккаунты и AI/практика ещё проходят отдельную реализацию/review; live-вход и модель не считаются проверенными.
 
 Node 24.22.1 LTS (`.nvmrc`), npm workspaces. Точные зависимости и транзитивные версии — package-lock.json.
 
@@ -27,8 +27,7 @@ npm start
 ```
 
 Contracts всегда собирается первым. E2E проверяет браузер и настоящий HTTP технического каркаса, не полную v1.
-`npm run db:migrate` намеренно завершится ошибкой до реализации мигратора Димой; это не заглушка успеха.
-Дима создаёт `apps/api/src/db/migrate.ts`; после build скрипт запускает его с .env.
+После build `npm run db:migrate` запускает принятый мигратор Димы с .env: checksum истории, advisory lock и транзакции. Для DB-тестов нужны NODE_ENV=test и отдельный TEST_DATABASE_URL, отличный от DATABASE_URL. В CI DB-тесты обязательны; локальный skip не является DB-проверкой.
 
 ```sh
 docker build -t empathy-coach:foundation .

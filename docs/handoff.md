@@ -9,7 +9,7 @@
 
 Антон: получить параметры облака и env без передачи секретов в чат; staging контейнер/HTTPS; Supabase redirects/почта/recovery; подтверждённые логины для приглашений. Не считать принятым контракт до реального review.
 
-## Проверенные результаты
+## История проверок исходного foundation
 
 Базовый код: `44202fb9e7f3044c245c2b0196705d4e03eb0e54` в main и feat/foundation.
 Локально: чистое npm ci, lint, typecheck, 8 тестов, production build; npm audit — 0 уязвимостей.
@@ -36,5 +36,5 @@ npm ci
 ## Текущая интеграционная контрольная точка
 
 Реальный вход → сохранение ситуации в PostgreSQL → анализ GigaChat → повторное открытие результата после logout/login. Настройки и команды: [services.md](services.md).
-zar1xxx и D1nch1k приняли приглашения (push=true у обоих). Storage PR #1 проверен на отдельной PostgreSQL и возвращён с request changes: ошибочные status/envelope в дочерних routes. Подробности в review PR.
+zar1xxx и D1nch1k приняли приглашения (push=true у обоих). Storage PR #1 принят в main после исправления status/envelope и зелёного реального DB CI: merge 5d8ac861dcbccc77117d34fd599bdfe8ddd832cd. Следующий PR #4 runs/GigaChat проверяется; initial head возвращён с concurrency-блокером, см. review.
 Облако не блокирует локальную интеграцию. HTTPS-проверка того же пути — после выдачи доступа. Зелёный foundation CI не подтверждает миграции/Auth/GigaChat.

@@ -1,4 +1,4 @@
-import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from 'react';
 
 export function Button({ busy, variant = 'primary', children, disabled, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean; variant?: 'primary' | 'secondary' | 'ghost' | 'danger' }) {
   return (
@@ -36,7 +36,7 @@ export function TextField({ label, hint, error, counter, ...rest }: FieldShell &
   );
 }
 
-export function TextArea({ label, hint, error, counter, ...rest }: FieldShell & TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function TextArea({ label, hint, error, counter, ...rest }: FieldShell & TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement> }) {
   const id = useId();
   return (
     <FieldFrame id={id} label={label} hint={hint} error={error} counter={counter}>

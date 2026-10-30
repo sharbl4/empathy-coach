@@ -1,7 +1,7 @@
 # Между строк
 
 Foundation v0.1.0 для полной v1 по [hackathon-prompts.md](hackathon-prompts.md).
-Приняты foundation и серверное хранение: Supabase token verification, PostgreSQL-миграции, профиль и owned session CRUD. Веб-аккаунты и AI/практика ещё проходят отдельную реализацию/review; live-вход и модель не считаются проверенными.
+В main приняты foundation, серверное хранение, runs/GigaChat и учебные API. Веб-аккаунты проходят отдельное review; живой вход пользователя и результат генерации не считаются проверенными. OAuth/список моделей и подключение к сервисам проверены отдельно, это не полный live-путь.
 
 Node 24.22.1 LTS (`.nvmrc`), npm workspaces. Точные зависимости и транзитивные версии — package-lock.json.
 
@@ -50,3 +50,4 @@ npm.cmd run dev
 
 Настройка Supabase Auth/SMTP, GigaChat и локальная контрольная точка: [docs/services.md](docs/services.md).
 `npm run services:check` проверяет доступность без генерации; `npm run checkpoint:live` — явный live-путь после готовности модулей и dev/test env. Foundation CI не подтверждает этот путь.
+Эти команды, а также root dev/start используют launcher: CA из NODE_EXTRA_CA_CERTS применяется при старте дочернего Node. Если для GigaChat нужен официальный CA, укажите абсолютный локальный путь в .env; настройка описана в docs/services.md. Access token вручную не задаётся.

@@ -25,7 +25,7 @@ Reverse proxy обеспечивает HTTPS; /api/health/live для liveness, 
 |---|---|
 | GitHub | [sharbl4/empathy-coach](https://github.com/sharbl4/empathy-coach) создан private; main/feat/foundation отправлены, Actions работают |
 | Supabase | project URL/key не заданы; создать/выбрать dev/test/prod проект, настроить env |
-| DB | локальные Docker/PostgreSQL запущены, SELECT 1 успешен; app.sessions отсутствует — ждём миграции Димы. Production DATABASE_URL не предоставлен |
+| DB | локальные Docker/PostgreSQL healthy, SELECT 1 успешен; принятые миграции применены дважды, app.sessions существует. Production DATABASE_URL не предоставлен |
 | Auth redirects | после выдачи HTTPS URL задать Site URL и allowlist callback/recovery (dev отдельно) |
 | Регистрационные письма | проверить нового внешнего получателя, spam/лимиты; при необходимости SMTP |
 | Recovery | проверить письмо, переход на allowlisted URL, update password и повторный вход |

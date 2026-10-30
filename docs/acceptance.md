@@ -1,8 +1,7 @@
 # Приёмка и границы проверок
 
-Foundation CI: чистое npm ci, lint, typecheck, схемы/фикстуры/JSON docs, HTTP injection health/error, Playwright с настоящим HTTP, production build, Docker build. Зелёный foundation CI не означает готовность v1.
-Миграции и продуктовые интеграционные проверки не добавлены в foundation CI как фиктивные успешные шаги.
-Дима добавляет мигратор и DB-тесты; Антон затем добавляет обязательный product CI job с PostgreSQL и тестовыми Auth/model адаптерами.
+CI: чистое npm ci, lint, typecheck, схемы/фикстуры/JSON docs, HTTP health/error, Playwright с настоящим HTTP, production build, Docker build/runtime. После storage PR #1 CI также мигрирует runtime-БД, отдельную пустую storage test-БД дважды и запускает реальные DB-тесты с NODE_ENV=test. Отсутствие TEST_DATABASE_URL больше не позволяет незаметно пропустить storage tests в CI при наличии мигратора.
+Это проверка реализованного storage, а не готовность всей v1. Полный продуктовый E2E и живые Auth/GigaChat/почта остаются отдельными незавершёнными gates.
 
 Обязательные release gates (пока не пройдены):
 

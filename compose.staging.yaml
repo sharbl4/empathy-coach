@@ -1,0 +1,13 @@
+# Deployment template for a VM/persistent container host. No cloud resources created.
+services:
+  app:
+    image: ${APP_IMAGE:?Set APP_IMAGE to an immutable tested image tag or digest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      AI_PROVIDER: gigachat
+      APP_ORIGIN: ${APP_ORIGIN:?Set the actual HTTPS origin after hosting is issued}
+      PORT: ${PORT:-3000}
+    ports:
+      - '127.0.0.1:${HOST_PORT:-3000}:${PORT:-3000}'

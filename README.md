@@ -48,3 +48,6 @@ npm.cmd run dev
 ```
 
 В новом clone установите Node версии `.nvmrc`. Private GitHub: https://github.com/sharbl4/empathy-coach.
+
+Настройка Supabase Auth/SMTP, GigaChat и локальная контрольная точка: [docs/services.md](docs/services.md).
+`npm run services:check` проверяет доступность без генерации; `npm run checkpoint:live` — явный live-путь после готовности модулей и dev/test env. Foundation CI не подтверждает этот путь.

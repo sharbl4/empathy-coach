@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { Id, Session, SessionDetail, SessionPage, Me, type RequestFor, type SessionInput } from '@between/contracts';
+import { Id, Session, SessionDetail, SessionPage, Me, Progress, type RequestFor, type SessionInput } from '@between/contracts';
 import { HttpError, notFound } from '../errors.js';
 
 type Connection = Pool | PoolClient;
@@ -25,7 +25,7 @@ export class Storage {
       RETURNING id,display_name,onboarding_completed_at`,[userId,patch?.displayName,patch?.onboardingCompleted??false]);
     const row=result.rows[0];
     return Me.parse({id:row.id,displayName:row.display_name,onboardingCompletedAt:row.onboarding_completed_at?.toISOString()??null,
-      aiMode:'gigachat',capabilities:{analysis:true,reply:false,exercise:false,roleplay:false}});
+      aiMode:'gigachat',capabilities:{analysis:true,reply:true,exercise:true,roleplay:true}});
   }
   async create(userId:string,input:SessionInput) {
     return transaction(this.pool,async client=>{
@@ -64,11 +64,11 @@ export class Storage {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       const value=await this.owned(client,userId,id);
       const runs=await client.query(`SELECT id,session_id AS "sessionId",revision,kind,status,output,error_code AS "errorCode",created_at AS "createdAt",updated_at AS "updatedAt"
-        FROM app.ai_runs WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at,id LIMIT 1000`,[id,userId,value.revision]);
+        FROM app.ai_runs WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at DESC,id DESC LIMIT 1000`,[id,userId,value.revision]);
       const roles=await client.query(`SELECT r.id,r.session_id AS "sessionId",r.revision,r.status,r.turn_count AS "turnCount",r.feedback,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id',m.id,'sequence',m.sequence,'role',m.role,'content',m.content) ORDER BY m.sequence)
           FROM app.roleplay_messages m WHERE m.roleplay_id=r.id),'[]'::jsonb) AS messages
-        FROM app.roleplays r WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at,id LIMIT 100`,[id,userId,value.revision]);
+        FROM app.roleplays r WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at DESC,id DESC LIMIT 100`,[id,userId,value.revision]);
       return SessionDetail.parse({...value,runs:runs.rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString()})),roleplays:roles.rows});
     });
   }
@@ -100,5 +100,17 @@ export class Storage {
       return runs.rows.map(row=>row.id);
     });
     onDeleted?.(ids);
+  }
+  async progress(userId:string) {
+    return transaction(this.pool,async client=>{
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      const counts=(await client.query(`SELECT count(DISTINCT session_id) FILTER(WHERE kind='analysis')::int AS "analyzedSessions",
+        count(*) FILTER(WHERE kind='exercise')::int AS "completedExercises",count(*) FILTER(WHERE kind='roleplay')::int AS "completedRoleplays"
+        FROM app.practice_events WHERE user_id=$1`,[userId])).rows[0];
+      const skills=await client.query('SELECT skill,count(*)::int AS count FROM app.practice_events WHERE user_id=$1 GROUP BY skill ORDER BY count DESC,skill LIMIT 100',[userId]);
+      const latest=(await client.query(`SELECT CASE WHEN kind='analysis' THEN output->>'skillTip' ELSE output->>'nextPractice' END AS tip
+        FROM app.ai_runs WHERE user_id=$1 AND status='succeeded' AND (kind='analysis' OR (kind IN ('roleplay_turn','roleplay_feedback') AND output->>'kind'='feedback')) ORDER BY updated_at DESC,id DESC LIMIT 1`,[userId])).rows[0];
+      return Progress.parse({...counts,skills:skills.rows,latestTip:latest?.tip??null});
+    });
   }
 }

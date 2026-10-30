@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { DeleteData, ExpectedRevision, Id, IdempotencyHeaders, RunAccepted, SessionInput, SessionQuery, UpdateMe, UpdateSession } from '@between/contracts';
+import { DeleteData, ExpectedRevision, ExerciseAnswer, ReplyRequest, TurnRequest, Id, IdempotencyHeaders, RunAccepted, SessionInput, SessionQuery, UpdateMe, UpdateSession } from '@between/contracts';
 import { Storage } from '../repositories/storage.js';
 import { type AuthVerifier, supabaseVerifier } from '../auth/verifier.js';
 import { HttpError, unavailable } from '../errors.js';
@@ -38,4 +38,15 @@ export async function storageRoutes(app:FastifyInstance,options:StorageOptions) 
   app.get('/api/runs/:id',request=>{
     const runId=id(request.params);if(!options.runs)throw unavailable();return options.runs.get(request.userId,runId);
   });
+  const runs=()=>{if(!options.runs)throw unavailable();return options.runs;};
+  const key=(headers:unknown)=>IdempotencyHeaders.parse(headers)['idempotency-key'];
+  app.post('/api/sessions/:id/reply-feedback',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().replyFeedback(request.userId,id(request.params),ReplyRequest.parse(request.body),key(request.headers)))));
+  app.post('/api/sessions/:id/reply-examples',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().replyExamples(request.userId,id(request.params),ExpectedRevision.parse(request.body),key(request.headers)))));
+  app.post('/api/sessions/:id/exercise',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().exercise(request.userId,id(request.params),ExpectedRevision.parse(request.body),key(request.headers)))));
+  app.post('/api/sessions/:id/exercise-feedback',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().exerciseFeedback(request.userId,id(request.params),ExerciseAnswer.parse(request.body),key(request.headers)))));
+  app.post('/api/sessions/:id/roleplays',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().roleplayStart(request.userId,id(request.params),ExpectedRevision.parse(request.body),key(request.headers)))));
+  app.post('/api/roleplays/:id/turns',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().roleplayTurn(request.userId,id(request.params),TurnRequest.parse(request.body),key(request.headers)))));
+  app.post('/api/roleplays/:id/finish',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().roleplayFinish(request.userId,id(request.params),ExpectedRevision.parse(request.body),key(request.headers)))));
+  app.post('/api/runs/:id/retry',async(request,reply)=>reply.code(202).send(RunAccepted.parse(await runs().retry(request.userId,id(request.params),ExpectedRevision.parse(request.body),key(request.headers)))));
+  app.get('/api/progress',request=>db().progress(request.userId));
 }

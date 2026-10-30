@@ -8,6 +8,8 @@ import { type AiProvider, ModelError, PROMPT_VERSION } from '../ai/provider.js';
 export class Runs {
   private lease?:PoolClient;
   private tasks=new Set<Promise<void>>();
+  // These permits track actual provider promises, independently of deletable DB rows.
+  private executing=new Map<string,{userId:string;controller:AbortController}>();
   private stopping=false;
   private abort=new AbortController();
   constructor(private pool:Pool,private provider:AiProvider,private maxConcurrency=2,private maxPerUser=1,private timeoutMs=30000) {
@@ -33,6 +35,7 @@ export class Runs {
     if(this.stopping||!this.lease)throw new HttpError(503,'DEPENDENCY_UNAVAILABLE','Обработка временно недоступна');
     const hash=createHash('sha256').update(JSON.stringify(['POST',`/api/sessions/${sessionId}/analyze`,{expectedRevision:revision}])).digest('hex');
     const store=new Storage(this.pool);
+    let reservation:string|undefined;
     const result=await transaction(this.pool,async client=>{
       await client.query('SELECT id FROM app.profiles WHERE id=$1 FOR UPDATE',[userId]);
       const session=await store.owned(client,userId,sessionId,true);
@@ -46,18 +49,23 @@ export class Runs {
       // Serializes admission only; no external request or queue is held in this transaction.
       await client.query('SELECT pg_advisory_xact_lock(748311904)');
       const count=await client.query("SELECT count(*)::int AS total,count(*) FILTER(WHERE user_id=$1)::int AS owned FROM app.ai_runs WHERE status='pending'",[userId]);
-      if(count.rows[0].total>=this.maxConcurrency||count.rows[0].owned>=this.maxPerUser)throw new HttpError(429,'RATE_LIMITED','Дождитесь завершения текущего разбора');
+      const owned=[...this.executing.values()].filter(value=>value.userId===userId).length;
+      if(count.rows[0].total>=this.maxConcurrency||count.rows[0].owned>=this.maxPerUser||this.executing.size>=this.maxConcurrency||owned>=this.maxPerUser)throw new HttpError(429,'RATE_LIMITED','Дождитесь завершения текущего разбора');
       const input=SessionInput.parse({title:session.title,situation:session.situation,guess:session.guess});
       const id=randomUUID();
+      this.executing.set(id,{userId,controller:new AbortController()});reservation=id;
       await client.query(`INSERT INTO app.ai_runs(id,session_id,user_id,revision,kind,status,input,prompt_version,idempotency_key,payload_hash)
         VALUES($1,$2,$3,$4,'analysis','pending',$5,$6,$7,$8)`,[id,sessionId,userId,revision,input,PROMPT_VERSION,key,hash]);
       return {id,created:true,input};
-    });
+    }).catch(error=>{if(reservation)this.executing.delete(reservation);throw error;});
     if(result.created){
       const task=this.execute(result.id,userId,sessionId,revision,result.input);
       this.tasks.add(task);void task.finally(()=>this.tasks.delete(task));
     }
     return {runId:result.id};
+  }
+  cancelDeleted(ids:string[]) {
+    for(const id of ids)this.executing.get(id)?.controller.abort();
   }
   async get(userId:string,id:string) {
     const result=await this.pool.query(`SELECT r.id,r.session_id AS "sessionId",r.revision,r.kind,r.status,r.output,r.error_code AS "errorCode",
@@ -71,14 +79,18 @@ export class Runs {
   private async execute(id:string,userId:string,sessionId:string,revision:number,input:SessionInput) {
     let output:OutputFor<'analysis'>|null=null;
     let errorCode:ModelError['code']|'RUN_INTERRUPTED'|null=null;
-    const signal=AbortSignal.any([this.abort.signal,AbortSignal.timeout(this.timeoutMs)]);
+    const controller=this.executing.get(id)?.controller;
+    const signal=AbortSignal.any([this.abort.signal,AbortSignal.timeout(this.timeoutMs),...(controller?[controller.signal]:[])]);
     try {
       // Guard even injected/test providers. A late provider cannot commit after timeout.
       const value=await new Promise<OutputFor<'analysis'>>((resolve,reject)=>{
         const cancel=()=>reject(new ModelError('MODEL_TIMEOUT'));
         signal.addEventListener('abort',cancel,{once:true});
-        this.provider.analyze(input,signal).then(resolve,reject).finally(()=>signal.removeEventListener('abort',cancel));
-        if(signal.aborted)cancel();
+        if(signal.aborted){this.executing.delete(id);cancel();return;}
+        Promise.resolve().then(()=>this.provider.analyze(input,signal)).then(resolve,reject).finally(()=>{
+          signal.removeEventListener('abort',cancel);
+          this.executing.delete(id);
+        });
       });
       try{output=validateAnalysisEvidence(value,input.situation.message);}catch{throw new ModelError('MODEL_INVALID_OUTPUT');}
     }catch(error){errorCode=this.stopping?'RUN_INTERRUPTED':error instanceof ModelError?error.code:'MODEL_UNAVAILABLE';}

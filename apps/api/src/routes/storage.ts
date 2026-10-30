@@ -23,7 +23,7 @@ export async function storageRoutes(app:FastifyInstance,options:StorageOptions) 
   const id=(params:unknown)=>Id.parse((params as {id:string}).id);
   app.get('/api/me',request=>db().profile(request.userId));
   app.patch('/api/me',request=>db().profile(request.userId,UpdateMe.parse(request.body)));
-  app.delete('/api/me/data',async(request,reply)=>{DeleteData.parse(request.body);await db().clear(request.userId);return reply.code(204).send();});
+  app.delete('/api/me/data',async(request,reply)=>{DeleteData.parse(request.body);await db().clear(request.userId,ids=>options.runs?.cancelDeleted(ids));return reply.code(204).send();});
   app.post('/api/sessions',async(request,reply)=>reply.code(201).send(await db().create(request.userId,SessionInput.parse(request.body))));
   app.get('/api/sessions',request=>db().list(request.userId,SessionQuery.parse(request.query)));
   app.get('/api/sessions/:id',request=>db().detail(request.userId,id(request.params)));

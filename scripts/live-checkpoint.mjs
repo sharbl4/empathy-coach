@@ -45,9 +45,12 @@ try{
   console.log('OK confirmed Auth login and live AI mode');
   stage='create session';
   const input=api.createSession.body.parse({title:'Integration checkpoint',situation:{message:'Давай поговорим завтра.',relationship:'Коллега',context:'Вымышленная проверочная ситуация.',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}});
-  const session=api.createSession.response.parse(await call('/api/sessions',{method:'POST',body:input,expected:201}));
+  const creationKey=randomUUID();
+  const session=api.createSession.response.parse(await call('/api/sessions',{method:'POST',body:input,key:creationKey,expected:201}));
+  const repeatedSession=api.createSession.response.parse(await call('/api/sessions',{method:'POST',body:input,key:creationKey,expected:201}));
+  assert.equal(repeatedSession.id,session.id);
   assert.deepEqual(session.situation,input.situation);
-  console.log('OK session saved through HTTP');
+  console.log('OK session saved through HTTP; duplicate POST returned the same session');
   stage='live analysis';
   const key=randomUUID();const body={expectedRevision:session.revision};
   const accepted=api.analyze.response.parse(await call(`/api/sessions/${session.id}/analyze`,{method:'POST',body,key,expected:202}));

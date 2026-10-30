@@ -1,10 +1,26 @@
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useEffect, useState } from 'react';
-import { Health } from '@between/contracts';
+// config must load first: it reads auth-link status from the URL before the SDK clears it.
+import './lib/config';
+import { loadServices } from './lib/services';
+import { AppProviders } from './app/context';
+import { App } from './app/App';
 import './style.css';
-function App() {
-  const [status,setStatus] = useState('Проверяем соединение…');
-  useEffect(()=>{const controller=new AbortController(); fetch('/api/health/live',{signal:controller.signal}).then(r=>r.json()).then(data=>{Health.parse(data);setStatus('Сервер доступен');}).catch(()=>{if(!controller.signal.aborted)setStatus('Сервер недоступен. Обновите страницу.');});return ()=>controller.abort();},[]);
-  return <main><p>ТРЕНАЖЁР ОБЩЕНИЯ</p><h1>Между строк</h1><p>Замечать сигналы. Проверять гипотезы. Подбирать слова.</p><section><h2>Технический каркас v1</h2><p role="status">{status}</p><p>Учебные сценарии и регистрация ещё не подключены.</p></section></main>;
+
+const root = createRoot(document.getElementById('root')!);
+
+async function start() {
+  const services = await loadServices();
+  const initial = await services.auth.init().catch(() => ({ user: null, recovery: false }));
+  root.render(
+    <StrictMode>
+      <AppProviders services={services} initial={initial}>
+        <App />
+      </AppProviders>
+    </StrictMode>,
+  );
 }
-createRoot(document.getElementById('root')!).render(<App/>);
+
+start().catch(() => {
+  root.render(<main className="page page-narrow"><h1>Между строк</h1><p role="alert">Не удалось запустить приложение. Обновите страницу.</p></main>);
+});

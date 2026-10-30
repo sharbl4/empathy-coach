@@ -5,6 +5,9 @@ import { AuthCallbackPage, CheckEmailPage, ForgotPasswordPage, LoginPage, Recove
 import { ProfileProvider } from '../features/account/profile';
 import { Shell } from '../features/account/Shell';
 import { Placeholder } from '../features/account/placeholders';
+import { HistoryPage } from '../features/sessions/HistoryPage';
+import { NewSessionPage } from '../features/sessions/NewSessionPage';
+import { SessionPage } from '../features/sessions/SessionPage';
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => { navigate(to, { replace: true, force: true }); }, [to]);
@@ -20,9 +23,10 @@ const publicAuth: Record<string, () => ReactNode> = {
 
 interface CabinetRoute { pattern: string; render(params: Record<string, string>): ReactNode; }
 const cabinet: CabinetRoute[] = [
-  { pattern: '/new', render: () => <Placeholder title="Новый разбор" text="Форма ситуации и гипотезы — в следующем PR." /> },
-  { pattern: '/history', render: () => <Placeholder title="История" text="Список разборов с поиском — в следующем PR." /> },
-  { pattern: '/sessions/:id', render: () => <Placeholder title="Разбор" text="Экран разбора — в следующем PR." /> },
+  { pattern: '/new', render: () => <NewSessionPage /> },
+  { pattern: '/history', render: () => <HistoryPage /> },
+  // key: a different session id remounts the page, so no state or polling leaks between sessions.
+  { pattern: '/sessions/:id', render: params => <SessionPage key={params.id} id={params.id} /> },
   { pattern: '/practice', render: () => <Placeholder title="Практика" text="Прогресс и практика — задача дня 2." /> },
   { pattern: '/settings', render: () => <Placeholder title="Настройки" text="Имя и удаление данных — задача дня 2." /> },
 ];

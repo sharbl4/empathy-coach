@@ -1,0 +1,10 @@
+import { writeFileSync } from 'node:fs';
+import { api } from '../packages/contracts/src/index.js';
+import { requestFixtures,responseFixtures } from '../packages/contracts/src/fixtures.js';
+let doc='# API · contracts 0.1.0\n\nИсточник истины: packages/contracts. Все объекты strict, неизвестные поля body отклоняются.\nAuth только через Supabase SDK; все маршруты кроме health требуют Bearer.\nUUID path params; никакого ownerId/userId/истории роли/готового анализа от клиента.\n\nAI POST: Idempotency-Key UUID + expectedRevision; 202 RunAccepted. Create session: 201. Deletes: 204 без body (fixture null обозначает отсутствие JSON). Остальные успехи 200.\nPolling GET /api/runs/:id раз в 1–2 секунды, остановить при уходе. Resume из SessionDetail.runs.\nСтарый ключ возвращает прежний run, изменённый payload → 409. Failed roleplay retry: только POST /api/runs/:id/retry с новым ключом; body expectedRevision, без повторной реплики.\nRevision изменяется только при изменении входных данных. Все результаты относятся к sessionId+revision.\nИстория: cursor непрозрачный, limit 1..50 (default 20), q до 200; updatedAt DESC,id DESC. nextCursor=null означает конец.\n\nОшибки HTTP: 400 VALIDATION_ERROR; 401 UNAUTHORIZED; 404 NOT_FOUND (включая чужой объект); 409 REVISION_CONFLICT / OPERATION_IN_PROGRESS / IDEMPOTENCY_CONFLICT; 429 RATE_LIMITED; 503 DEPENDENCY_UNAVAILABLE; 500 INTERNAL_ERROR.\nФорма: {error:{code,message,requestId}}. Failed run errorCode: RUN_INTERRUPTED / MODEL_TIMEOUT / MODEL_UNAVAILABLE / MODEL_INVALID_OUTPUT / MODEL_REFUSED / CONFIGURATION_ERROR. Сырые ответы и stack trace запрещены.\nСемантика зависимостей, concurrency, удаления и retry: architecture.md.\n\n';
+for(const [name,route] of Object.entries(api)){
+  doc+=`## ${route.method} ${route.path}\n\n`;
+  if('body' in route)doc+=`Запрос:\n\n<!-- schema:${name}.body -->\n\`\`\`json\n${JSON.stringify(requestFixtures[name],null,2)}\n\`\`\`\n\n`;
+  doc+=`Ответ:\n\n<!-- schema:${name}.response -->\n\`\`\`json\n${JSON.stringify(responseFixtures[name],null,2)}\n\`\`\`\n\n`;
+}
+writeFileSync('docs/api.md',doc.trimEnd()+'\n');

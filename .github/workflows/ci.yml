@@ -1,0 +1,42 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: empathy
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: empathy_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U empathy -d empathy_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://empathy:ci_only@127.0.0.1:5432/empathy_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - run: docker build -t empathy-coach:ci .
+      - name: Container HTTP and database readiness
+        shell: bash
+        run: |
+          docker run -d --name empathy-ci --network host -e DATABASE_URL="$DATABASE_URL" empathy-coach:ci
+          trap 'docker rm -f empathy-ci >/dev/null' EXIT
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:3000/api/health/ready
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/missing)" = 404
+# Product DB/Auth/model integration gate is tracked in docs/acceptance.md.
+# Foundation CI deliberately does not claim those unimplemented checks pass.

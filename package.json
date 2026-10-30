@@ -7,8 +7,10 @@
     "build": "npm run build -w @between/contracts && npm run build -w @between/web && npm run build -w @between/api",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "npm run build -w @between/contracts && npm run typecheck --workspaces",
-    "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts",
+    "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts scripts/test/*.test.mjs",
     "db:migrate": "node scripts/migrate.mjs",
+    "services:check": "node --env-file-if-exists=.env scripts/check-services.mjs",
+    "checkpoint:live": "npm run build -w @between/contracts && node --env-file-if-exists=.env scripts/live-checkpoint.mjs",
     "e2e": "npm run build && playwright test",
     "start": "npm run start -w @between/api"
   },

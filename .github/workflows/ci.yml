@@ -25,8 +25,27 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Enable real storage tests when migrations exist
+        id: storage
+        shell: bash
+        run: |
+          if test -f apps/api/src/db/migrate.ts; then
+            docker exec '${{ job.services.postgres.id }}' createdb -U empathy empathy_storage_test
+            echo 'TEST_DATABASE_URL=postgresql://empathy:ci_only@127.0.0.1:5432/empathy_storage_test' >> "$GITHUB_ENV"
+            echo 'NODE_ENV=test' >> "$GITHUB_ENV"
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Storage migrations are not implemented on this ref; foundation checks only.'
+          fi
       - run: npm run lint
       - run: npm run typecheck
+      - name: Migrate empty storage database and verify repeatability
+        if: steps.storage.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          npm run build -w @between/api
+          DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
+          DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
@@ -38,5 +57,5 @@ jobs:
           trap 'docker rm -f empathy-ci >/dev/null' EXIT
           curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:3000/api/health/ready
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/missing)" = 404
-# Product DB/Auth/model integration gate is tracked in docs/acceptance.md.
-# Foundation CI deliberately does not claim those unimplemented checks pass.
+# Storage tests become mandatory as soon as migrate.ts exists; no opt-in skip in CI.
+# Real external Auth/model/email remain separate live release gates.

@@ -25,12 +25,27 @@ Reverse proxy обеспечивает HTTPS; /api/health/live для liveness, 
 |---|---|
 | GitHub | [sharbl4/empathy-coach](https://github.com/sharbl4/empathy-coach) создан private; main/feat/foundation отправлены, Actions работают |
 | Supabase | project URL/key не заданы; создать/выбрать dev/test/prod проект, настроить env |
-| DB | Docker daemon не запущен; production DATABASE_URL не предоставлен; включить daemon или выдать managed DB |
+| DB | локальные Docker/PostgreSQL запущены, SELECT 1 успешен; app.sessions отсутствует — ждём миграции Димы. Production DATABASE_URL не предоставлен |
 | Auth redirects | после выдачи HTTPS URL задать Site URL и allowlist callback/recovery (dev отдельно) |
 | Регистрационные письма | проверить нового внешнего получателя, spam/лимиты; при необходимости SMTP |
 | Recovery | проверить письмо, переход на allowlisted URL, update password и повторный вход |
 | GigaChat | credentials/scope/model/base URL не заданы; Дима проверяет официальный v1/v2 формат и первый live JSON |
 | Hosting | получить доступ и параметры от организаторов; публичная публикация пока заблокирована |
-| Приглашения | подтверждённые Антоном D1nch1k и zar1xxx проверены через GitHub API; write-приглашения отправлены, принятие не подтверждено |
+| Приглашения | zar1xxx принял, push=true; приглашение D1nch1k активно/не просрочено |
 
 Не выводить значения env, токены и письма в отчёт. Проверка наличия SDK не подтверждает настроенный аккаунт или бюджет.
+
+## Подготовленный VM/container шаблон
+
+compose.staging.yaml не создаёт хостинг: он запускает один заранее собранный image, слушающий за HTTPS reverse proxy. Хостовый порт привязан к loopback; TLS/домен настраиваются средствами выданной площадки. Для платформы без Docker Compose использовать тот же Dockerfile, PORT/env и release migration job.
+После получения доступа и готовности модулей:
+
+1. Задать реальный APP_ORIGIN=https://<выданный hostname>, DATABASE_URL и остальные server env на хостинге; публичные Supabase значения передать build args.
+2. Собрать образ с тегом точного проверенного commit и записать его в APP_IMAGE. Никогда не использовать плавающий latest для отката.
+3. Проверить шаблон: `docker compose -f compose.staging.yaml config --quiet`. Не выполнять `config` без --quiet: он может вывести секреты.
+4. Backup БД; `docker compose -f compose.staging.yaml run --rm app node scripts/migrate.mjs` — один release job после review миграций. Пока мигратора нет, release блокируется.
+5. `docker compose -f compose.staging.yaml up -d app`; проверить readiness, HTTPS и SPA refresh.
+6. Настроить фактические Auth redirects по docs/services.md; выполнить checkpoint:live против HTTPS origin, затем UI, email delivery/recovery, restart и изоляцию двух пользователей.
+7. Откат приложения: APP_IMAGE=предыдущий проверенный image, повтор up -d. Не удалять volumes, не откатывать SQL разрушительно.
+
+Шаблон не подтверждает готовность облака или live-сервисов. Foundation readiness проверяет только SELECT 1, не миграции и не модель.

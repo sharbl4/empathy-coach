@@ -28,4 +28,6 @@ Set secrets locally in the ignored root `.env` or hosting environment. Do not pa
 - GIGACHAT_CREDENTIALS: API Authorization Key, GIGACHAT_SCOPE, GIGACHAT_MODEL, GIGACHAT_BASE_URL: versioned API endpoint. API quota/model entitlement must be confirmed against the account.
 - Hosting: persistent single backend process, outbound Auth/OAuth/model access and trusted TLS CA. Staging and deployment belong to Anton.
 
-Stage 1 capabilities advertise only analysis; reply, exercise and roleplay are false until implemented. Live Auth/model availability and DB checks require their actual environments; unit tests do not establish staging readiness.
+Verified locally on PostgreSQL 17.6: migrations apply and reapply safely; real DB suite checks owner isolation, concurrent revision conflict, cursor/search, reconnect persistence, pending conflicts, owner FKs and cascade deletion. `npm test` with NODE_ENV=test and TEST_DATABASE_URL: 11 passed, 0 skipped. Typecheck, lint and production build passed. Foundation CI passed on the initial stage-1 commit; it is not a product integration gate.
+
+Stage 1 capabilities advertise only analysis; reply, exercise and roleplay are false until implemented. Live Auth/model availability requires actual environments; tests do not establish staging readiness.

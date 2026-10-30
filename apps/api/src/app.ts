@@ -15,7 +15,6 @@ export async function createApp(options:Partial<StorageOptions> = {}) {
     try{if(!pool)throw new Error(); await pool.query('SELECT 1'); return Health.parse({status:'ok'});}
     catch{return reply.code(503).send(ApiError.parse({error:{code:'DEPENDENCY_UNAVAILABLE',message:'База данных недоступна',requestId:request.id}}));}
   });
-  await app.register(storageRoutes,{pool,auth:options.auth});
   const root=fileURLToPath(new URL('../../web/dist/',import.meta.url));
   if(existsSync(root))await app.register(statics,{root});
   app.setNotFoundHandler((request,reply)=>{
@@ -30,5 +29,6 @@ export async function createApp(options:Partial<StorageOptions> = {}) {
     const dbFailure=error instanceof Error&&('severity' in error || /^(ECONN|ETIMEDOUT|ENOTFOUND)/.test(String(('code' in error&&error.code)||'')));
     reply.code(bad?400:dbFailure?503:500).send({error:{code:bad?'VALIDATION_ERROR':dbFailure?'DEPENDENCY_UNAVAILABLE':'INTERNAL_ERROR',message:bad?'Некорректный запрос':dbFailure?'База данных недоступна':'Внутренняя ошибка',requestId:request.id}});
   });
+  await app.register(storageRoutes,{pool,auth:options.auth});
   return app;
 }

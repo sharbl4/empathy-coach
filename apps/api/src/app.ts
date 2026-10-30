@@ -33,7 +33,7 @@ export async function createApp(options:Partial<StorageOptions>&{provider?:AiPro
     if(error instanceof HttpError)return reply.code(error.statusCode).send({error:{code:error.code,message:error.message,requestId:request.id}});
     const status=error instanceof Error&&'statusCode' in error?error.statusCode:500;
     const bad=status===400||status===413||(error instanceof Error&&error.name==='ZodError');
-    const dbFailure=error instanceof Error&&('severity' in error || /^(ECONN|ETIMEDOUT|ENOTFOUND)/.test(String(('code' in error&&error.code)||'')));
+    const dbFailure=error instanceof Error&&('severity' in error || /^(ECONN|ETIMEDOUT|ENOTFOUND)/.test(String(('code' in error&&error.code)||'')) || /Connection terminated|Connection timeout|timeout exceeded when trying to connect|Query read timeout/i.test(error.message));
     reply.code(bad?400:dbFailure?503:500).send({error:{code:bad?'VALIDATION_ERROR':dbFailure?'DEPENDENCY_UNAVAILABLE':'INTERNAL_ERROR',message:bad?'Некорректный запрос':dbFailure?'База данных недоступна':'Внутренняя ошибка',requestId:request.id}});
   });
   await app.register(storageRoutes,{pool,auth:options.auth,runs});

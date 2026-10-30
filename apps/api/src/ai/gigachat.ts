@@ -51,9 +51,12 @@ export class GigaChatProvider implements AiProvider {
     const data=await models.json() as {data?:Array<{id?:string}>};
     if(!data.data?.some(model=>model.id===config.model))throw new ModelError('CONFIGURATION_ERROR');
     const balance=await this.transport(`${config.baseUrl}/balance`,{...options,signal:AbortSignal.timeout(10000)});
+    // Pay-as-you-go accounts officially return 403 here; budget must be checked in the account.
+    if(balance.status===403)return {budget:'manual-check-required' as const};
     if(!balance.ok)throw new ModelError('MODEL_UNAVAILABLE');
-    const quota=await balance.json() as {balance?:Array<{value?:number}>};
-    if(!quota.balance?.some(entry=>typeof entry.value==='number'&&entry.value>0))throw new ModelError('CONFIGURATION_ERROR');
+    const quota=await balance.json() as {balance?:Array<{usage?:string;value?:number}>};
+    if(!quota.balance?.some(entry=>entry.usage?.startsWith('GigaChat')&&typeof entry.value==='number'&&entry.value>0))throw new ModelError('CONFIGURATION_ERROR');
+    return {budget:'generation-tokens-positive' as const};
   }
   async analyze(input:SessionInput,signal:AbortSignal) {
     try {

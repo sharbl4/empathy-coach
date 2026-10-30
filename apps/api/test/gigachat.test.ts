@@ -43,3 +43,14 @@ test('GigaChat configuration, OAuth failure and timeout fail without fallback',a
   const timeout=new GigaChatProvider(config,async()=>{throw new DOMException('timeout','TimeoutError');});
   await assert.rejects(timeout.analyze(input,new AbortController().signal),e=>e instanceof ModelError&&e.code==='MODEL_TIMEOUT');
 });
+test('access probe checks model and distinguishes token packages from pay-as-you-go',async()=>{
+  for(const status of [200,403]){
+    const provider=new GigaChatProvider(config,async url=>{
+      if(String(url).includes('/oauth'))return json({access_token:'test',expires_at:Date.now()+120000});
+      if(String(url).endsWith('/models'))return json({data:[{id:config.model}]});
+      assert.ok(String(url).endsWith('/balance'));
+      return json({balance:[{usage:'GigaChat',value:100}]},status);
+    });
+    assert.equal((await provider.checkAccess()).budget,status===200?'generation-tokens-positive':'manual-check-required');
+  }
+});

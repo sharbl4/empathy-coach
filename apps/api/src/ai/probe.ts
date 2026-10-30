@@ -6,7 +6,7 @@ if(missing.length){console.error(`BLOCKED: missing env names: ${missing.join(', 
 else {
   try {
     const provider=configuredProvider();
-    await provider.checkAccess();console.info('OAuth, selected model and positive quota: passed');
+    const access=await provider.checkAccess();console.info(`OAuth and selected model: passed; budget: ${access.budget}`);
     if(process.argv.includes('--analyze')){
       await provider.analyze({title:'Проверка API',situation:{message:'Давай обсудим завтра.',relationship:'Коллега',context:'Выбираем время разговора',goal:'clarify'},guess:{emotions:[],evidenceQuotes:[],unsure:true}},AbortSignal.timeout(30000));
       console.info('One live analysis validated against shared schema and evidence: passed');

@@ -6,7 +6,7 @@
 
 ## Старт и контракт
 
-Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 —31574f8 (первый отдельный draft —88b83d3), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
+Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 2.1.0 —a619dab (31574f8 и первый draft88b83d3 заменены), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
 Полный обязательный [продукт](docs/product.md), [архитектура](docs/architecture.md), [приёмка](docs/acceptance.md).
 Код старого веба сохранён, но его Supabase-auth должен заменить Даня; до этого release guard не выдаёт его за рабочую новую авторизацию. Реальных domain/http/bot модулей пока нет; integration CI блокируется, а не исключается.
 

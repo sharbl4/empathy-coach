@@ -1,3 +1,18 @@
+# A1 2.1 review update · 2026-10-31
+
+Contract commit a619dab87c06541256c9155ee6f00cdd021c2f0a; unified current branch feat/web-telegram-integration. Review source: review-pr19-pr20.md; exact contracts: facade-v2.1.md and contract-a1-resolution.md.
+
+Actual new local checks: npm run test:contracts →34passed/0failed/0skipped; includes email/error/preview/auth/27-feature contracts and single-domain shared-entry lifecycle. npm run lint →success. Generated facade --check →success and now mandatory in test:contracts.
+Root npm run build still FAILS missing facade/http/bot index. Source-only web release guard FAILS active Supabase import. No DB test or browser/live flow is claimed run by these checks. Participant branches were read, not merged into this checkout.
+Read-only current PR19/20 heads match3b7ef64/f9fc301; both old base ed72784, root CI success and integration CI failure. Reviewed actual email/core/privacy/web/session/lifecycle/transport source, not just reports. PR17 not closed because complete preservation of useful preview/example/rating/level paths is not demonstrated.
+
+Local .env presence only (no values printed, file unchanged): DATABASE_URL present; TEST_DATABASE_URL, TELEGRAM_BOT_TOKEN, LOCAL_LLM_BASE_URL/MODEL/API_KEY, SMTP_HOST/FROM, EMAIL_CODE_SECRET, WEB_ORIGIN/WEB_SESSION_SECRET/WEB_LINK_SECRET absent or empty. Presence does not verify DB connectivity. Home GPU, cloud/DNS/private network and SMTP delivery access not supplied for live acceptance. No generation performed.
+
+No external messages/issue or PR updates; no participant code/migration changes; original user worktree files remain outside commits. See final GitHub CI run for the published latest head; do not infer its result from the older snapshot below.
+
+---
+
+## Previous f3ebfc0 verification snapshot
 # Integration verification · 2026-10-31
 
 Branch: feat/web-telegram-integration. Base ed72784 preserved; first contract88b83d3, lifecycle3559e0c, corrected approved bot-issued web auth31574f8. Start from latest full branch commit, not the first draft alone.

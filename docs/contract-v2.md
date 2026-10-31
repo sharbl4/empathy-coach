@@ -1,3 +1,5 @@
+> A1 2.1.0: email/error/HTTP/preview/lifecycle additions and exact signatures supersede omissions below. See [resolution](contract-a1-resolution.md), [generated facade](facade-v2.1.md), [current handoff](handoff-v2.md).
+
 # Общий контракт web + Telegram v2 · A1
 
 Новая явная версия решения Антона от31.10.2026 заменяет Telegram-only. Источник: packages/contracts/src/{product,http}.ts, exports @between/contracts/product и /http. Старые DTO/v1 сохранены для миграции/архивных регрессий, не новая публичная схема. Все27 функций раздела7 входят в текущий объём, а не roadmap. Фасада названа ProductFacade/CreateProductDomain. Первый сквозной путь реализуется раньше остальных функций, но отсутствие остальных блокирует полную приёмку.

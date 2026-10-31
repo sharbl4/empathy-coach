@@ -1,3 +1,5 @@
+> Current A1 protocol2.1.0: [exact signatures/endpoints](facade-v2.1.md), [email recovery/error/HTTP rules](contract-a1-resolution.md).
+
 # API v2: shared facade + session HTTP
 
 Источники: [product.ts](../packages/contracts/src/product.ts), [http.ts](../packages/contracts/src/http.ts), [семантика](contract-v2.md). imports @between/contracts/product, /http, /product-fixtures (последний только test).

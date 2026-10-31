@@ -49,5 +49,6 @@ npm.cmd run dev
 В новом clone установите Node версии `.nvmrc`. Private GitHub: https://github.com/sharbl4/empathy-coach.
 
 Настройка Supabase Auth/SMTP, GigaChat и локальная контрольная точка: [docs/services.md](docs/services.md).
+Проекты политики конфиденциальности, отдельного согласия и правил безопасности для веба и планируемого Telegram-бота: [docs/legal/README.md](docs/legal/README.md). До публичного сбора данных нужно закрыть указанные там условия; наличие документов не подтверждает соответствие текущих внешних сервисов требованиям РФ.
 `npm run services:check` проверяет доступность без генерации; `npm run checkpoint:live` — явный live-путь после готовности модулей и dev/test env. Foundation CI не подтверждает этот путь.
 Эти команды, а также root dev/start используют launcher: CA из NODE_EXTRA_CA_CERTS применяется при старте дочернего Node. Если для GigaChat нужен официальный CA, укажите абсолютный локальный путь в .env; настройка описана в docs/services.md. Access token вручную не задаётся.

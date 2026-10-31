@@ -1,12 +1,12 @@
 import {z} from 'zod';
 import {operations,type Operation,Empty,Id,PageQuery,PublicWebSession,WebEntry,RedeemWebLink,WebSessionPage,ProductError} from './product.js';
-export const IdempotencyRequestHeaders=z.object({'idempotency-key':Id,'x-csrf-token':z.string().min(32).max(200)});
-export const WriteHeaders=z.object({'x-csrf-token':z.string().min(32).max(200)});
-function route<K extends Operation>(method:'GET'|'POST'|'PATCH'|'DELETE',path:string,operation:K){return {method,path,operation,auth:'server-session' as const,...operations[operation]};}
+export const IdempotencyRequestHeaders=z.object({origin:z.url(),'idempotency-key':Id,'x-csrf-token':z.string().min(32).max(200)});
+export const WriteHeaders=IdempotencyRequestHeaders;
+function route<K extends Operation>(method:'GET'|'POST'|'PATCH'|'DELETE',path:string,operation:K){return {method,path,operation,auth:'server-session' as const,security:{origin:operations[operation].mutable,csrf:operations[operation].mutable,idempotency:operations[operation].mutable},...operations[operation]};}
 /** Adapter assembles path/query/body, rejects collisions, validates strict input, then issues ctx from cookie. */
 export const webApi={
   account:route('GET','/api/account','account'),updateAccount:route('PATCH','/api/account','updateAccount'),acceptConsent:route('POST','/api/account/consent','acceptConsent'),revokeConsent:route('DELETE','/api/account/consent','revokeConsent'),
-  requestEmailCode:route('POST','/api/account/email/challenge','requestEmailCode'),verifyEmailCode:route('POST','/api/account/email/verify','verifyEmailCode'),
+  emailVerification:route('GET','/api/account/email/verification','emailVerification'),requestEmailCode:route('POST','/api/account/email/challenge','requestEmailCode'),resendEmailCode:route('POST','/api/account/email/resend','resendEmailCode'),verifyEmailCode:route('POST','/api/account/email/verify','verifyEmailCode'),
   dialogue:route('GET','/api/dialogue','dialogue'),updateDialogue:route('PATCH','/api/dialogue','updateDialogue'),resetDialogue:route('POST','/api/dialogue/reset','resetDialogue'),
   createSession:route('POST','/api/sessions','createSession'),sessions:route('GET','/api/sessions','sessions'),session:route('GET','/api/sessions/:id','session'),updateSession:route('PATCH','/api/sessions/:id','updateSession'),deleteSession:route('DELETE','/api/sessions/:id','deleteSession'),
   deleteData:route('DELETE','/api/account/data','deleteData'),deleteAccount:route('DELETE','/api/account','deleteAccount'),
@@ -21,6 +21,16 @@ export const webApi={
   assessment:route('GET','/api/assessments/form','assessment'),submitAssessment:route('POST','/api/assessments/:id/submit','submitAssessment'),assessmentResults:route('GET','/api/assessments/results','assessmentResults'),
   rateRun:route('POST','/api/runs/:runId/rating','rateRun'),recordStage:route('POST','/api/events','recordStage'),support:route('GET','/api/support','support'),
 } as const;
+/** Every auth route binds to the shared facade; redemption is the login exchange. */
+export const authBindings={
+  session:{facade:'openBrowser',session:'optional',mutation:false,clearSessionCookie:false},
+  entry:{facade:'webEntry',session:'none',mutation:false,clearSessionCookie:false},
+  redeemWebLink:{facade:'redeemWebLink',session:'browser-binding',mutation:true,clearSessionCookie:false},
+  logout:{facade:'revokeCurrentWebSession',session:'required',mutation:true,clearSessionCookie:true},
+  sessions:{facade:'webSessions',session:'required',mutation:false,clearSessionCookie:false},
+  revokeSession:{facade:'revokeWebSession',session:'required',mutation:true,clearSessionCookie:'if-current'},
+  revokeAllSessions:{facade:'revokeAllWebSessions',session:'required',mutation:true,clearSessionCookie:true},
+} as const satisfies Record<keyof typeof authApi,{facade:keyof import('./product.js').ProductLifecycle;session:'optional'|'none'|'browser-binding'|'required';mutation:boolean;clearSessionCookie:boolean|'if-current'}>;
 export const authApi={
   session:{method:'GET',path:'/api/auth/session',input:Empty,response:PublicWebSession},
   entry:{method:'GET',path:'/api/auth/entry',input:Empty,response:WebEntry},

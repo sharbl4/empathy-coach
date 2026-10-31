@@ -28,6 +28,17 @@ test('production refuses the explicit test factory seam before boot',async()=>{
   finally{if(previous===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=previous;}
 });
 
+test('the root constructs one domain and passes that same instance to HTTP and polling',async()=>{
+  const previous=process.env.NODE_ENV;process.env.NODE_ENV='test';const dir=mkdtempSync(join(tmpdir(),'between-shared-')),events=[];
+  const factories=adapters(events,false),makeDomain=factories.createDomain,makeHttp=factories.createHttpAdapter,makeTelegram=factories.createTelegramTransport;
+  let domain,constructed=0,started=0;
+  factories.createDomain=async()=>{constructed++;const value=await makeDomain();domain=value;const start=value.start;value.start=async()=>{started++;await start();};return value;};
+  factories.createHttpAdapter=async options=>{assert.equal(options.domain,domain);return makeHttp();};
+  factories.createTelegramTransport=()=>{const transport=makeTelegram(),start=transport.start;transport.start=async supplied=>{assert.equal(supplied,domain);await start();};return transport;};
+  try{const application=await startApplication(config,{...factories,healthFile:join(dir,'health.json')});assert.equal(constructed,1);assert.equal(started,1);await application.close();}
+  finally{rmdirSync(dir);if(previous===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=previous;}
+});
+
 test('production rejects bypass and fixture modes before imports or networking',async()=>{
   for(const flags of [{AUTH_BYPASS:'1'},{VITE_API_MODE:'fixtures'},{TEST_ADAPTER:'true'}])await assert.rejects(startApplication({...config,NODE_ENV:'production',...flags}),/Production adapter flags forbidden/);
 });

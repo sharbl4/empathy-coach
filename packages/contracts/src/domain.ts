@@ -1,4 +1,6 @@
 /** Telegram-only in-process boundary v1. Old HTTP DTOs in index.ts are archival. */
+// Legacy v1 facade/options/errors below are archive-only. New transports use /product and /http.
+// Shared identity/account primitives are reused by v2; they are not a second identity authority.
 import {z} from 'zod';
 import {Id,Revision,Goal,SessionInput,UpdateSession,Session,SessionDetail,SessionQuery,SessionPage,Run,RunAccepted,ReplyRequest,ExpectedRevision,ExerciseAnswer,TurnRequest,Progress,DeleteData,Roleplay,Analysis,ReplyFeedback,ReplyOptions,Exercise,ExerciseFeedback,RoleplayMessageOutput,RoleplayOutput,RoleplayFeedbackOutput} from './index.js';
 export const TELEGRAM_CONTRACT_VERSION='1.0.0';

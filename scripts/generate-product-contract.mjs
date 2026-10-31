@@ -1,0 +1,14 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import ts from 'typescript';
+import {operations,SECTION7_CAPABILITIES,PRODUCT_CONTRACT_VERSION} from '@between/contracts/product';
+import {webApi,authApi,authBindings} from '@between/contracts/http';
+const source=ts.createSourceFile('product.ts',readFileSync('packages/contracts/src/product.ts','utf8'),ts.ScriptTarget.Latest,true);
+const lifecycle=source.statements.find(node=>ts.isInterfaceDeclaration(node)&&node.name.text==='ProductLifecycle');
+if(!lifecycle)throw new Error('Lifecycle interface missing');
+const signatures=Object.entries(operations).map(([name,definition])=>`${name}(ctx: UserContext, input: OperationInput<'${name}'>${definition.mutable?', key: string':''}): Promise<OperationOutput<'${name}'>>;`).join('\n');
+const rows=SECTION7_CAPABILITIES.map((item,index)=>`| ${index+1}. ${item.feature} | ${item.operations.join(', ')}${'lifecycle' in item?'; internal/auth: '+item.lifecycle.join(', '):''} | ${'previewKinds' in item?item.previewKinds.join(', '):'—'} |`).join('\n');
+const http=Object.entries(webApi).map(([name,route])=>`| ${route.method} ${route.path} | ${name} | ${route.security.csrf?'Origin + CSRF + intent':'session read'} |`).join('\n');
+const auth=Object.entries(authApi).map(([name,route])=>`| ${route.method} ${route.path} | ${authBindings[name].facade} | ${authBindings[name].session} | ${authBindings[name].mutation?'Origin + CSRF + intent':'read'} |`).join('\n');
+const output=`# Generated facade ${PRODUCT_CONTRACT_VERSION}\n\nSource: packages/contracts/src/product.ts and http.ts. Regenerate: npm run build -w @between/contracts; node scripts/generate-product-contract.mjs. Semantic rules: contract-v2.md and contract-a1-resolution.md. This is the complete mandatory scope, not a claim of implementation.\n\n## All section7 features\n\n| Feature | Shared facade | AI preview kind |\n|---|---|---|\n${rows}\n\n## Exact user method signatures\n\nOperationInput/OperationOutput infer the strict Zod input/response from operations; do not copy DTOs into transports. Every mutable key is a UUID IntentKey, domain validates it.\n\n\x60\x60\x60ts\n${signatures}\n\x60\x60\x60\n\n## Internal/auth lifecycle signatures\n\nOnly the root creates the domain and calls start once; operator analytics is never a user route. BrowserAccess/ConsumedWebLink contain private cookie material and cannot be serialized.\n\n\x60\x60\x60ts\n${lifecycle.members.map(member=>member.getText(source)).join('\n')}\n\x60\x60\x60\n\n## User HTTP bindings\n\n| Endpoint | Facade | Security |\n|---|---|---|\n${http}\n\n## Auth HTTP bindings\n\n| Endpoint | Facade | Session | Security |\n|---|---|---|---|\n${auth}\n`;
+const path='docs/facade-v2.1.md';
+if(process.argv.includes('--check')){if(readFileSync(path,'utf8')!==output){console.error('Generated facade docs stale; regenerate from contracts.');process.exit(1);}}else writeFileSync(path,output);

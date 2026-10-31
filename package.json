@@ -16,7 +16,7 @@
     "build": "node scripts/build-product.mjs",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "node scripts/build-product.mjs --typecheck",
-    "test:contracts": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts scripts/test/telegram-root.test.mjs scripts/test/application-lifecycle.test.mjs",
+    "test:contracts": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts scripts/test/telegram-root.test.mjs scripts/test/application-lifecycle.test.mjs && node scripts/generate-product-contract.mjs --check",
     "test": "npm run test:contracts && node scripts/test-domain.mjs",
     "test:legacy": "npm run build -w @between/contracts && tsx --test apps/api/test/*.test.ts scripts/test/readiness.test.mjs scripts/test/env-launcher.test.mjs",
     "db:migrate": "node scripts/migrate.mjs",

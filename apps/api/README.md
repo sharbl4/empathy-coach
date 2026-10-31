@@ -1,4 +1,103 @@
-# Backend handoff
+# Current acceptance · A1 2.2.1 · 2026-11-01
+
+Merged the complete reviewed candidate `b9d7557` (`test/stack-a1-nov01`, code candidate `6755408`) into the existing backend branch without replaying or replacing prior work. Shared contract `9cd742f` now provides `myRating`, explicit assessment discard and domain-only completion events. The earlier three browser failures below were addressed in the approved candidate and are historical, not the current acceptance report.
+
+Reviewed and accepted: owned run/get/list/detail vote projections, one atomic successful completion/event transaction, client rejection of `run_completed`, menu/restart preservation of the canonical assessment and explicit confirmed reset. Tightened the persistence guard further: menu cannot change answers, and changing step cannot silently shrink the saved answer prefix. Foreign vote/read tests use a freshly issued context after restart, so they actually test ownership rather than only an expired issuer.
+
+Immediate local handoff checks: **7 PostgreSQL/HTTP/lifecycle checks passed, zero skips**, including menu/restart/discard, owned votes/projections, invalid-output/no-success-event, real shared lifecycle and cookie/CSRF/logout. Separate fresh test/browser DBs applied all existing migrations twice; no new migration/schema/DTO was required for 2.2.1. API/test typecheck passed. Full build/shared/browser results will be recorded after the next local combined run; the integrator's prior results are in docs/handoff-v2.md and are not presented as independently rerun here. Live Telegram/SMTP/GPU/QQCloud remains separate.
+
+---
+
+# Archived backend handoff · A1 2.2
+
+Based on integration `436d17b` / contract `a71d379`, merged without rewriting the preceding checkpoint. Branch `feat/api-a1-v21` keeps its historical name; its current backend implements the 2.2 ProductFacade, HTTP and browser-adapter signatures. Root/contracts/bot/web sources were not modified by the backend port. The older sections below are archive material.
+
+`@between/api.createDomain` constructs one passive domain with pool max5. Root separately acquires the actual bot lease and starts workers/scheduler once. `@between/api/http.createHttpAdapter` receives that same facade. Model outage does not gate account/history reads. Queue admission uses canonical `options.ai.maxQueueLength`, with one physical execution permit retained until the provider promise actually settles. No generation retry/fallback/repair occurs automatically.
+
+Implemented handlers cover the current shared operations: accounts/consent/email recovery, sessions/history, previews/runs/roleplay, examples, daily practice/cards, opt-in reminders and local-date streaks, formal rubric attempts, assessment, votes, aggregate-only operator analytics and explicit support region. They are concrete DB-backed implementations, not throwing placeholders. This is an integration handoff, not full product or live acceptance. Editorial content and formal learning rubrics still need the lead's quality/policy review; the support catalogue currently has only a checked nationwide RU emergency contact, no invented regional/foreign numbers.
+
+## Transport rules
+
+- All DTOs come from `/product` and `/http`; server model URL policy comes from `/runtime`.
+- Email status/challenge and remaining attempts come only from DB. Resend never uses a bot Map as authority. SMTP happens outside transactions; uncertain DATA acceptance is delivery_unknown, never an automatic resend.
+- Create/read preview -> display every field -> save `navigation.preview` with exactly that id/revision/hash through `updateDialogue` -> confirm -> start. An edit requires displaying and saving the new version again. Reading a newer preview does not approve it. Unknown/oversize token budgets cannot generate.
+- Model metadata uses the pinned [llama.cpp b12019 server API](https://github.com/ggml-org/llama.cpp/blob/b12019/tools/server/README.md). Before confirmation only static system/template content reaches metadata endpoints. Actual confirmed text is tokenized before the single generation request; template/model changes invalidate authorization. No GPU compatibility or latency is claimed from adapters.
+- `DialogueV2` is the only transient draft/navigation authority. Reads do not extend expiry; successful mutations use idle1h/max24h. Expiry/reset/revoke clears transient state and cached dialogue content while preserving revision, saved history/runs and completed results.
+- Partial assessment answers are an ordered prefix in `navigation.assessment`; save the full draft, then submit with `expectedDialogueRevision`. Completion and navigation clearing are atomic; another interface's changes conflict.
+- Read `supportRegion`, ask for an explicit country/coarse region when needed, save with expectedRevision, then call `support(ctx,{})`. Default is null/region_required with no contacts. deleteData preserves this account preference; account deletion cascades it.
+- Unknown failures use the shared INTERNAL_ERROR, not an invented transient error. Inbox attempts/nextAttemptAt and terminal failed outcome survive restart; ack does not rewrite failed to completed. Reconcile the same durable intention after uncertain outcomes.
+
+## Browser adapter and validation
+
+`apps/api/test/browser-adapter.ts` exports `startBrowserTestServer({origin,port,webRoot,databaseUrl}) -> {close}`. It requires NODE_ENV=test, loopback3011 and a distinct test DB. Its explicit test bot issues links for synthetic A/B through the real facade; normal cookie exchange is not replaced. A's history title is `Тестовая история участника A`. The test helper is not imported by production and no test factory is exported by the public HTTP entry.
+
+Current completed checks: 53 full backend/regression checks passed with zero skips, including real browser-adapter startup/link/exchange/history and repeated fixture link issuance; 39 shared contracts/runtime/root checks passed with zero skips. API build/typecheck (including tests), root lint, side-effect-free import and public HTTP export checks passed. A separate fresh upgrade 001/002 -> 003–011 preserved synthetic legacy history, repeated cleanly and created no implicit Telegram mapping. Applied migrations 001–011 are immutable. Unique redaction counting uses owner-bound HMAC provenance, so a phone repeated in title/message counts once without retaining the original number. The browser adapter advances an explicit fixture clock between issued links; production rate limits remain enforced.
+
+These tests use real isolated PostgreSQL/loopback HTTP and explicit mail/model/clock adapters. They cover ownership/revisions, original-intent HMAC before masking, email recovery/attempt replay, inbox restart, CSRF/exchange races/logout, full shown-preview guarding, role turns, draft-only/thread input, retained execution permits, daily/card uniqueness, DST/quiet hours and seven-calendar-day eligibility. They do not prove real Telegram delivery, app SMTP inbox delivery, GPU output quality or QQCloud/DNS/HTTPS.
+
+## Joint check with PR #22 f12d309
+
+In an isolated checkout combining this backend and that exact participant head: unchanged production build and full API/bot/web typecheck passed; unchanged npm test passed (39 contracts/root + 82 domain/bot/web, zero skips). No participant branch or integration branch was rewritten/merged remotely. The Playwright gate remains **failed: 10 passed, 3 failed**, with strict checks preserved. Shared history/refresh, two-user ID isolation, CSRF, mobile width, composer recovery, partial assessment recovery and explicit support-region persistence passed.
+
+Remaining precise joint issues to address in the owning zones:
+
+- `apps/web/src/lib/connectToken.ts` captures the fragment only at initial module execution. `e2e/interfaces.spec.ts:32` revisits the same path with a fragment after reload (same-document navigation) and times out. Handle a new link in the existing tab safely, or make the intended fresh-tab test actually open a fresh document; retain immediate fragment removal and explicit POST.
+- `apps/web/src/features/preview/PreviewPage.tsx` does not save the displayed id/revision/hash through updateDialogue on display/after edit. Backend correctly refuses edit/confirm without matching shown navigation; `interfaces.spec.ts:77` cannot reach revision2. Save exactly the displayed version, never fetch-and-approve the latest one. Do not weaken the backend guard to accommodate this.
+- `e2e/shared-account.spec.ts:27` reads session immediately after a logout click, with no wait for the completed outcome, and sees authenticated=true in the shared scenario. The dedicated logout scenario with navigation wait and direct POST/held-context tests pass. A separate browser probe observed POST200 and authenticated=false after completion. First wait for the logout response/navigation; investigate further if it still reproduces.
+
+These failures are not reclassified as successful browser acceptance. Safe diagnostics record only scenario names and test locations, not tokens/cookies/auth URLs or raw errors. Live test-bot/second-user, app SMTP delivery, home GPU/private-network, QQCloud/HTTPS and policy/editorial approval remain separate dependencies.
+
+---
+# Archived v1 domain implementation for plan v4
+
+Branch is based on integration ed727847 / shared @between/contracts/domain 1.0.0. createDomain is implemented without import-time work or Fastify/Supabase/GigaChat in its runtime graph. Only apps/api and new migrations are changed. Plan v4 (web + Telegram) supersedes the Telegram-only root documents; root/contracts/transport updates belong to Anton/Danya.
+
+Implemented: domain-issued frozen contexts with issuer checks and live account authorization; UUID accounts with unique Telegram BIGINT; consent/email gates; HMAC email codes (10m, five attempts, resend >=60s and per-account/address hourly caps); TLS/STARTTLS SMTP adapter; persisted dialogue; scoped transactional write idempotency and content-free deletion tombstones; durable inbox/cursor, per-user update slot and shutdown/poller lease; PostgreSQL queue, one active model call and retained execution permits; persistent result outbox/backoff; old learning services and say-direct adaptation. Registration and account deletion never link accounts by matching email.
+
+Internal WebSessions storage implements hash-only short-lived login links, non-consuming inspection, atomic redemption, rotating seven-day server sessions, Secure/HttpOnly/SameSite cookies, origin/CSRF checks, logout and revoke-all. Issued web contexts recheck the associated session. This class is not a public HTTP/facade API yet.
+
+LocalLlmProvider only uses the configured private endpoint, one generation per run, bounded request/response/context, explicit thinking-disable fields, reasoning/partial/invalid JSON rejection and shared evidence validation. JSON-schema requests are opt-in only after the inference-server capability is measured. Default input budgeting uses a conservative UTF-8 upper bound; no input is silently truncated. No real GPU, SMTP or Telegram calls were made by the new tests.
+
+## Required contract/integration work (not implemented or claimed ready)
+
+The currently published PR #18 remains Telegram-only. PR #19 adds the bot against the same domain 1.0.0 contract and reports the same missing v4 interfaces; neither publishes A1's web+Telegram revision. A1 must publish that revision before the public two-interface implementation can be completed:
+
+- Login-link/session methods, HTTP routes/CSRF DTOs, web-issued principal/context and explicit app/worker lifecycle. Fastify/web are still archived by the integration root; I did not change those files.
+- Server-owned privacy preview/confirmation DTO and methods (revision/hash and every outgoing field, including drafts, exercise answers and role turns). The domain currently refuses AI without a matching confirmation record. Tests seed such records directly only in the isolated test DB; no production bypass exists. The v1 createSession method masks email/phone but is not the complete v4 preview/history flow.
+- Registration recovery DTO: active email challenge ID/expiry/resend state are not readable after bot restart through current Account/Dialogue DTOs. The code/challenge remain durable internally, but that transport recovery boundary needs a contract.
+- Durable typed update payload/recovery policy if accepted inputs must remain replayable beyond Telegram redelivery. Current inbox stores identity HMAC, receipt and stable intent, no raw updates; offset stays behind unfinished entries.
+- DTOs/catalogues for evidence categories/comparison, direct/draft-only input, three difficulties, four contexts/transcripts, daily practice/reminders, rubric assessments, cards, before/after tests, usefulness and allowed analytics/policy actions. B3 expansion is not implemented by this branch.
+
+No shared schemas were copied or changed to guess those interfaces. Existing v1 learning can be adapted through the shared facade; it does not prove all v4 requirements or the full browser/bot product.
+
+## New checks
+
+Use a dedicated local TEST_DATABASE_URL containing test and distinct from runtime DATABASE_URL, with NODE_ENV=test. Build contracts first:
+
+```
+npm run build -w @between/contracts
+npm run build -w @between/api
+npm run typecheck -w @between/api
+node --import tsx --test apps/api/test/domain*.test.ts
+node scripts/check-domain-export.mjs
+npm run test:legacy
+npm run test:contracts
+npm run lint
+```
+
+The domain suites use real PostgreSQL and explicit test-only mail/model/clock dependencies. They cover forged context, consent/email gating, code expiry/attempt/reissue/concurrent redemption, SMTP failure, idempotent writes/deletion, inbox/FSM restart and TTL, single poller, queue cap/deletion/late output/restart/outbox and web auth storage. `createDomainForTest` is not exported by the package entry and rejects injection outside NODE_ENV=test. API typecheck includes all tests.
+
+Local handoff validation: 34 backend/archived checks passed with zero skips (including 11 new domain/provider/web-storage checks); 15 shared-contract/root checks passed; API build/typecheck, lint and side-effect-free import passed. A separate real PostgreSQL upgrade from applied 001/002 to 003–006 preserved a synthetic legacy profile/session, repeated cleanly and created no implicit Telegram account mapping. The complete root test gate still fails without the bot tests; root build fails without the bot entry from PR #19.
+
+Migrations 003–006 are additive; applied 001/002 are unchanged. Temporary dialogue data expires after one hour; bounded maintenance clears expired drafts/code material, old rate metadata and completed inbox entries after seven days. Completed outbox tombstones stay while their run exists to prevent re-delivery on reconciliation. Data/account deletion removes content from idempotency results; old keys cannot resurrect history. These retention defaults need the lead's final policy review.
+
+Additional internal settings to agree in root env: AI_QUEUE_LIMIT (default10, bounded50), EMAIL_ACCOUNT_HOURLY_LIMIT (5), EMAIL_ADDRESS_HOURLY_LIMIT (10), LOCAL_LLM_JSON_SCHEMA (explicit capability flag, default off), LOCAL_LLM_CONTEXT_TOKENS (4096). DomainOptions and root env files were not changed. EMAIL_CODE_SECRET is server-only; no addresses/codes/cookies/tokens/output are logged.
+
+Full root build/test currently remains blocked by the missing bot entry/tests and pending v4 root/contracts work. Standalone domain/archived checks are not a substitute for those integration gates or real Telegram/SMTP/GPU/web acceptance.
+
+---
+
+# Archived web/GigaChat backend handoff (previous release)
 
 API implements shared contracts 0.1.0: Supabase getUser, profile, saved-session CRUD/search/cursor, analysis, reply feedback/examples, exercise/feedback, roleplay start/turn/finish/retry, progress and learning-data deletion. All capabilities are advertised as implemented. Root dependencies, lockfile and shared contracts are unchanged.
 

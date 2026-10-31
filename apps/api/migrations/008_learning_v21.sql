@@ -1,0 +1,12 @@
+CREATE TABLE app.product_reminders(user_id uuid PRIMARY KEY REFERENCES app.accounts(id) ON DELETE CASCADE,value jsonb NOT NULL);
+CREATE TABLE app.product_completions(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,kind text NOT NULL CHECK(kind IN ('daily','card')),content_id text NOT NULL,content_version text NOT NULL,local_date date NOT NULL,completed_at timestamptz NOT NULL,UNIQUE(user_id,kind,content_id,content_version,local_date));
+CREATE UNIQUE INDEX product_card_once ON app.product_completions(user_id,content_id,content_version) WHERE kind='card';
+CREATE TABLE app.product_reminder_dates(user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,local_date date NOT NULL,delivery_id uuid NOT NULL REFERENCES app.product_deliveries(id) ON DELETE CASCADE,PRIMARY KEY(user_id,local_date));
+CREATE TABLE app.product_assessments(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,value jsonb NOT NULL,result jsonb,timezone text NOT NULL,followup_eligible_at timestamptz);
+CREATE UNIQUE INDEX product_assessment_kind ON app.product_assessments(user_id,(value->>'kind'));
+CREATE TABLE app.product_skill_attempts(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,source_run_id uuid NOT NULL UNIQUE,value jsonb NOT NULL,FOREIGN KEY(source_run_id,user_id) REFERENCES app.product_runs(id,user_id) ON DELETE CASCADE);
+CREATE TABLE app.product_votes(user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,run_id uuid NOT NULL,value text NOT NULL CHECK(value IN ('useful','not_useful')),updated_at timestamptz NOT NULL,PRIMARY KEY(user_id,run_id),FOREIGN KEY(run_id,user_id) REFERENCES app.product_runs(id,user_id) ON DELETE CASCADE);
+CREATE TABLE app.product_events(id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,name text NOT NULL,context_type text,resource_id uuid,created_at timestamptz NOT NULL);
+CREATE UNIQUE INDEX product_event_resource ON app.product_events(user_id,name,resource_id) WHERE resource_id IS NOT NULL;
+REVOKE ALL ON ALL TABLES IN SCHEMA app FROM PUBLIC;
+DO $$ DECLARE r text; BEGIN FOREACH r IN ARRAY ARRAY['anon','authenticated'] LOOP IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname=r) THEN EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA app FROM %I',r);END IF;END LOOP;END $$;

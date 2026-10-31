@@ -3,6 +3,8 @@ import tls from 'node:tls';
 import {once} from 'node:events';
 import type {DomainOptions} from '@between/contracts/domain';
 export interface MailTransport {sendCode(email:string,code:string):Promise<void>;}
+/** DATA was submitted but acceptance could not be determined; never auto-resend. */
+export class MailDeliveryUnknown extends Error {constructor(){super('Mail delivery outcome unknown');}}
 class Replies {
   private buffer='';private bytes=0;private lines:string[]=[];private waiter?:{resolve:()=>void;reject:(error:Error)=>void};private failed?:Error;
   constructor(readonly socket:net.Socket){socket.setEncoding('utf8');socket.on('data',this.data);socket.on('error',this.error);socket.on('close',this.closed);}
@@ -33,7 +35,7 @@ export function smtpTransport(config:DomainOptions['smtp']):MailTransport {
     if(/[\r\n<>]/.test(email)||!/^\d{6}$/.test(code))throw new Error('Invalid mail input');
     let socket:net.Socket|tls.TLSSocket=config.port===465?tls.connect({host:config.host,port:config.port,servername:config.host,rejectUnauthorized:true}):net.connect({host:config.host,port:config.port});
     const abort=()=>socket.destroy(new Error('SMTP deadline'));
-    const timer=setTimeout(abort,10000);let wire=new Replies(socket);
+    const timer=setTimeout(abort,10000);let wire=new Replies(socket),submitted=false,accepted=false;
     try {
       if(config.port===465)await once(socket,'secureConnect');
       if((await wire.read()).code!==220)throw new Error('SMTP greeting failed');
@@ -50,7 +52,8 @@ export function smtpTransport(config:DomainOptions['smtp']):MailTransport {
       }
       await wire.command(`MAIL FROM:<${config.from}>`,[250]);await wire.command(`RCPT TO:<${email}>`,[250,251]);await wire.command('DATA',[354]);
       const body=[`From: ${config.from}`,`To: ${email}`,'Subject: Email verification code','MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: 7bit','',`Your verification code: ${code}`,'The code expires in 10 minutes. If you did not request it, ignore this email.',''].join('\r\n');
-      await wire.command(`${body}\r\n.`,[250]);await wire.command('QUIT',[221]);
-    }finally{clearTimeout(timer);wire.detach();socket.destroy();}
+      submitted=true;await wire.command(`${body}\r\n.`,[250]);accepted=true;await wire.command('QUIT',[221]).catch(()=>{});
+    }catch(error){if(submitted&&!accepted)throw new MailDeliveryUnknown();throw error;}
+    finally{clearTimeout(timer);wire.detach();socket.destroy();}
   }};
 }

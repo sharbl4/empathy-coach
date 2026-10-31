@@ -1,4 +1,18 @@
-# Domain implementation for plan v4
+# Current backend checkpoint: A1 2.1, moving to 2.2
+
+Branch `feat/api-a1-v21` contains the real ProductFacade, explicit lifecycle, HTTP adapter and isolated browser adapter. This checkpoint preserves work before merging integration `436d17b` / contract `a71d379`; it is not yet compatible with the 2.2 navigation/region/assessment additions. Do not merge it as 2.2-ready.
+
+Implemented against 2.1: DB email recovery/resend and safe errors; durable inbox retry budget; browser-bound CSRF/Origin and one-use exchange with hash-only tokens, 24h/2h sessions and revocation; owned/revision-checked history; full public preview/edit/confirm/start; bounded one-permit model queue/outbox; editorial learning catalogue, cards/practice, roles, formal rubric attempts, assessments, opt-in reminders/DST, votes and internal analytics. Construction/import starts no workers/poller/HTTP. Active runtime uses `/product` and `/http`; archived v1 lives in `legacy-facade.ts` for regression checks only.
+
+Last completed regression before the final model metadata changes: 46 backend checks, zero failures/skips; 34 contracts/root checks, zero failures/skips. API build/typecheck, lint and library import passed. Two additional local-model adapter tests passed after that run; a complete rerun is required after the 2.2 port. Tests use real dedicated PostgreSQL plus explicit model/mail/clock adapters, not real Telegram/GPU/SMTP delivery. Migrations 001–009 have been applied repeatedly on the isolated local DB; applied SQL is immutable.
+
+Local model metadata uses the pinned [llama.cpp b12019 server API](https://github.com/ggml-org/llama.cpp/blob/b12019/tools/server/README.md): `/props`, static-only `/apply-template` and `/tokenize` before confirmation. Unknown metadata produces an unknown budget and cannot generate. Confirmed outgoing content is tokenized before the single generation request; byte-bounded preview admission remains conservative. Prompt/server template changes invalidate snapshots. No actual GPU compatibility or latency claim is made.
+
+Pending immediate 2.2 port: canonical persisted navigation, idle/max dialogue TTL and shown-preview links; partial assessment answers and atomic submit; explicit persisted support region; `/runtime`-only server helper imports. Then rerun backend/HTTP/browser-adapter and shared integration gates. Root/bot/web integration and real browser acceptance are separate checks; the older v1 handoff below is historical.
+
+---
+
+# Archived v1 domain implementation for plan v4
 
 Branch is based on integration ed727847 / shared @between/contracts/domain 1.0.0. createDomain is implemented without import-time work or Fastify/Supabase/GigaChat in its runtime graph. Only apps/api and new migrations are changed. Plan v4 (web + Telegram) supersedes the Telegram-only root documents; root/contracts/transport updates belong to Anton/Danya.
 

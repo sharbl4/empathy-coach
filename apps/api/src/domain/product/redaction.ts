@@ -1,0 +1,3 @@
+/** Sanitization of user text only; metadata IDs are never an identity authority. */
+export function maskText(value:string){return value.replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9.-]*[A-Z0-9])?\.[A-Z]{2,}/gi,'[email скрыт]').replace(/(?<![\p{L}\p{N}])\+?\d[\d ()–.-]{5,}\d(?![\p{L}\p{N}])/gu,match=>{const digits=match.replace(/\D/g,'');return digits.length>=7&&digits.length<=15?'[телефон скрыт]':match;});}
+export function maskAll<T>(value:T):T{if(typeof value==='string')return maskText(value) as T;if(Array.isArray(value))return value.map(maskAll) as T;if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,k==='id'||k.endsWith('Id')?v:maskAll(v)])) as T;return value;}

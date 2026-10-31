@@ -5,7 +5,7 @@ import {Pool} from 'pg';
 import {SessionInput,type UserContext,type DomainOptions,type DomainFacade} from '@between/contracts/domain';
 import {Analysis} from '@between/contracts';
 import {situations,outputFixtures} from '@between/contracts/fixtures';
-import {createDomainForTest,createDomain} from '../src/domain/facade.js';
+import {createDomainForTest,createDomain} from '../src/domain/legacy-facade.js';
 import {digest} from '../src/domain/core.js';
 import {maskAll,maskText} from '../src/domain/privacy.js';
 import {migrate} from '../src/db/migrate.js';

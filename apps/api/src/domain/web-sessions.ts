@@ -44,7 +44,7 @@ export class WebSessions {
       if(!link||link.consumed_at||link.expires_at.getTime()<=this.now())fail('UNAUTHORIZED');
       await client.query('UPDATE app.web_login_links SET consumed_at=$2 WHERE id=$1',[link.id,new Date(this.now())]);
       if(previousCookie&&valid(previousCookie))await client.query('UPDATE app.web_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL',[hash(previousCookie),new Date(this.now())]);
-      await client.query('INSERT INTO app.web_sessions(id,user_id,token_hash,created_at,expires_at) VALUES($1,$2,$3,$4,$5)',[id,row.id,hash(sessionToken),new Date(this.now()),expiresAt]);return this.contexts.issueWeb(row,id);
+      await client.query('INSERT INTO app.web_sessions(id,user_id,token_hash,created_at,last_seen_at,expires_at) VALUES($1,$2,$3,$4,$4,$5)',[id,row.id,hash(sessionToken),new Date(this.now()),expiresAt]);return this.contexts.issueWeb(row,id);
     });
     return {context:ctx,sessionToken,csrfToken:this.csrf(id,sessionToken),expiresAt:expiresAt.toISOString(),cookie:this.cookie(sessionToken)};
   }

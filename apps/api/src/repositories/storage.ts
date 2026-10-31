@@ -3,14 +3,10 @@ import type { Pool, PoolClient } from 'pg';
 import { Id, Session, SessionDetail, SessionPage, Me, Progress, type RequestFor, type SessionInput } from '@between/contracts';
 import { HttpError, notFound } from '../errors.js';
 import {DomainSessionDetail} from '@between/contracts/domain';
+import {transaction} from '../db/transaction.js';
+export {transaction};
 
 type Connection = Pool | PoolClient;
-export async function transaction<T>(pool:Pool, work:(client:PoolClient)=>Promise<T>):Promise<T> {
-  const client=await pool.connect();
-  try { await client.query('BEGIN'); const result=await work(client); await client.query('COMMIT'); return result; }
-  catch(error) { await client.query('ROLLBACK'); throw error; }
-  finally { client.release(); }
-}
 const columns=`id,title,situation,guess,revision,created_at AS "createdAt",updated_at AS "updatedAt"`;
 // pg serializes JS Date to millisecond precision; cursors separately preserve PostgreSQL microseconds.
 function session(row:Record<string,unknown>) {

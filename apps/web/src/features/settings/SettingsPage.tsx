@@ -72,6 +72,13 @@ function EmailSection() {
   );
 }
 
+function DisplayName({current}:{current:string}) {
+  const {refresh}=useSession();
+  const [name,setName]=useState(current);const [busy,setBusy]=useState(false);const [msg,setMsg]=useState<{tone:'success'|'error';text:string}|null>(null);
+  const save=async()=>{setBusy(true);setMsg(null);try{await api('updateAccount',{displayName:name.trim()},{key:newKey()});await refresh();setMsg({tone:'success',text:'Имя сохранено (видно и в боте).'});}catch(e){setMsg({tone:'error',text:errorText(e)});}finally{setBusy(false);}};
+  return <form className="row" onSubmit={e=>{e.preventDefault();void save();}}><TextField label="Как к вам обращаться" value={name} maxLength={100} onChange={e=>setName(e.target.value)}/><Button type="submit" variant="secondary" busy={busy} disabled={!name.trim()||name.trim()===current}>Сохранить</Button>{msg&&<Notice tone={msg.tone}>{msg.text}</Notice>}</form>;
+}
+
 function WebSessions() {
   const list=useAsync(signal=>auth('sessions',{limit:20},{signal}),[]);
   const {refresh}=useSession();const [error,setError]=useState<string|null>(null);
@@ -108,6 +115,7 @@ export function SettingsPage() {
       {done&&<Notice tone="success">{done}</Notice>}{error&&<Notice tone="error">{error}</Notice>}
       <section className="card"><h2>Аккаунт</h2>
         <dl className="meta"><dt>Имя</dt><dd>{a.displayName}</dd><dt>Почта</dt><dd>{a.emailVerified?'подтверждена':'не подтверждена'}</dd><dt>Согласие</dt><dd>{a.consentVersion??'нет'}</dd></dl>
+        <DisplayName current={a.displayName}/>
         <p className="small muted">Вход — через Telegram-бота. Пароля нет. Данные проходят через Telegram и сервер проекта; модель работает на компьютере команды.</p>
         {a.consentVersion!==POLICY?<Button onClick={()=>void accept()}>Дать согласие (web-telegram-2, черновик)</Button>:<Button variant="secondary" onClick={()=>setDialog('consent')}>Отозвать согласие</Button>}
       </section>

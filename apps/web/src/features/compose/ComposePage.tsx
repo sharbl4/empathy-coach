@@ -7,6 +7,7 @@ import {api,errorText,newKey} from '../../lib/api';
 import {contextLabels,goalLabels,modeLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
 import {sourceKind} from '../preview/source';
+import {recordStage} from '../../lib/stage';
 
 type Mode=z.infer<typeof LearningMode>;type Ctx=z.infer<typeof ContextType>;type GoalValue=z.infer<typeof Goal>;
 interface Turn {id:string;speaker:'self'|'other';text:string}
@@ -50,6 +51,7 @@ export function ComposePage() {
     try{
       const session=await api('createSession',parsed.data,{key:key.current});
       const preview=await api('createPreview',{kind:sourceKind(mode),sessionId:session.id,expectedRevision:session.revision},{key:newKey()});
+      recordStage('preview_created',{contextType,resourceId:preview.id});
       navigate(`/previews/${preview.id}`);
     }catch(e){setError(errorText(e));setBusy(false);}
   };
@@ -103,13 +105,16 @@ export function ComposePage() {
 }
 
 export function ExamplesPage() {
-  const list=useAsync(signal=>api('examples',{limit:20},{signal}),[]);
+  const [contextType,setContextType]=useState<Ctx|''>('');
+  const list=useAsync(signal=>api('examples',{limit:20,...(contextType?{contextType}:{})},{signal}),[contextType]);
   return (
     <>
       <h1>Попробовать на примере</h1>
-      <p>Вымышленные ситуации. Ответы генерирует настоящая модель.</p>
+      <p>Вымышленные ситуации. Ответы генерирует настоящая модель. Одна и та же фраза может встречаться в разных сферах — сравните разборы.</p>
+      <div className="field"><label htmlFor="examples-context">Сфера</label><select id="examples-context" value={contextType} onChange={e=>setContextType(e.target.value as Ctx|'')}><option value="">Все</option>{Object.entries(contextLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
       {list.loading&&<Loading label="Загружаем примеры"/>}
       {list.error!==undefined&&<Notice tone="error">{errorText(list.error)}</Notice>}
+      {list.data&&!list.data.items.length&&<p className="muted">Примеров в этой сфере нет.</p>}
       <ul className="history-list">{list.data?.items.map(e=><li key={e.id} className="history-item"><div><a className="history-title" href={`/new?example=${encodeURIComponent(e.id)}`} onClick={ev=>{ev.preventDefault();navigate(`/new?example=${encodeURIComponent(e.id)}`);}}>{e.input.title}</a><p className="small muted">{modeLabels[e.input.mode]} · {contextLabels[e.input.contextType]}</p></div></li>)}</ul>
     </>
   );

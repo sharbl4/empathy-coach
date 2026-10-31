@@ -464,3 +464,37 @@ test('poller: offset from the domain cursor; fatal 409 ends polling',async()=>{
   await assert.rejects(new Poller(tg,h.domain.asFacade(),h.flows,{timeoutSeconds:0,backoffMs:1,fatal:e=>e instanceof TelegramError&&e.status===409}).run(new AbortController().signal));
   assert.deepEqual(offsets,[0,42]);
 });
+
+test('edit a saved situation: new revision via updateSession; a concurrent web edit is a conflict, not an overwrite',async()=>{
+  const h=new Harness();await analysed(h);
+  const s=[...h.domain.store.values()][0]!;
+  await h.message('/history');await h.click(/^1\./);await h.click('Изменить');
+  assert.match(h.lastText(),/новая версия 2/);
+  await h.click('Собеседник');await h.message('Брат');
+  await h.click('Не понимаю');
+  assert.equal(s.revision,2);assert.equal(s.input.relationship,'Брат');assert.equal(h.domain.store.size,1,'no second session');
+  assert.match(h.lastText(),/Так текст уйдёт в модель/);
+  await h.message('/history');await h.click(/^1\./);await h.click('Изменить');await h.click('Контекст');
+  s.revision=7; // the web saved a newer version meanwhile
+  await h.message('Новый контекст');await h.click('Не понимаю');
+  assert.match(h.lastText(),/Данные изменились/);assert.equal(s.revision,7);assert.notEqual(s.input.context,'Новый контекст');
+});
+
+test('history search by title and example filter by context',async()=>{
+  const h=new Harness();await h.register();
+  await understandToPreview(h,'Про отпуск');await understandToPreview(h,'Про работу');
+  await h.message('/history');await h.click('Поиск по названию');await h.message('отпуск');
+  assert.match(h.lastText(),/«отпуск»/);assert.match(h.lastText(),/Про отпуск/);assert.doesNotMatch(h.lastText(),/Про работу/);
+  await h.click('Сбросить поиск');assert.match(h.lastText(),/Про работу/);
+  await h.message('/menu');await h.click('Попробовать на примере');await h.click('Коллеги');
+  assert.match(h.lastText(),/В сфере «Коллеги» примеров нет/);
+  await h.click('Все сферы');assert.ok(h.last().buttons.some(b=>/«Ок\.»/.test(b.text)));
+});
+
+test('stage events: allowlisted names only, no user text',async()=>{
+  const h=new Harness();await analysed(h);
+  await h.message('/menu');await h.click('Ещё →');await h.click('Практика дня');await h.click('Выполнено');
+  const names=h.domain.stages.map(e=>(e as {name:string}).name);
+  for(const n of ['onboarding_started','onboarding_completed','preview_created','preview_confirmed','practice_completed'])assert.ok(names.includes(n),n);
+  assert.ok(!JSON.stringify(h.domain.stages).includes('Позвони'));
+});

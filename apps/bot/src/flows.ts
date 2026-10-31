@@ -50,7 +50,7 @@ const nextField=(d:Draft)=>d.mode?ORDER[d.mode].find(k=>d[k]===undefined):undefi
 const sourceKind=(mode:Mode)=>mode==='understand'||mode==='thread'?'analysis' as const:mode;
 
 /** Navigation-only memory (not learning data). Lost on restart; every path then asks again. Contract gaps are listed in README. */
-interface Memo {editingField?:string;speaker?:'self'|'other';cardId?:string;reminderField?:'time'|'timezone'|'quiet';assessment?:{id:string;kind:'baseline'|'followup';answers:{questionId:string;choiceId:string}[]};cursors?:(string|null)[];historyFilter?:Ctx|null}
+interface Memo {editingField?:string;editRevision?:{sessionId:string;revision:number};search?:boolean;historyQuery?:string;examplesFilter?:Ctx|null;speaker?:'self'|'other';cardId?:string;reminderField?:'time'|'timezone'|'quiet';assessment?:{id:string;kind:'baseline'|'followup';answers:{questionId:string;choiceId:string}[]};cursors?:(string|null)[];historyFilter?:Ctx|null}
 
 export class Flows {
   private memo=new Map<string,Memo>();
@@ -118,6 +118,8 @@ export class Flows {
       if(step==='email')return this.emailInput(t,text);
       if(step==='email_code')return this.codeInput(t,text);
       if(!ready(t.account))return this.resumeOnboarding(t);
+      // History search was requested by a button; it does not touch the saved draft of the current step.
+      if(m.search){delete m.search;if(text.length>200)return this.say(t,T.tooLong(200,text.length));m.historyQuery=text;m.cursors=[null];return this.history(t,0,m.historyFilter??null);}
       switch(step){
         case 'compose':return this.composeInput(t,text);
         case 'guess':return this.guessInput(t,text);
@@ -159,7 +161,7 @@ export class Flows {
     // menu
     m:(t,arg)=>this.menuAction(t,arg),
     pick:(t,arg)=>{const d=t.dlg.draft;const mode=arg as Mode;if(!ORDER[mode])return this.say(t,T.texts.stale);
-      return this.compose(t,mode==='understand'?{mode,...(d.message?{message:d.message}:{})}:{mode,...(d.draft?{draft:d.draft}:{})});},
+      return this.compose(t,mode==='understand'?{mode,...(d.message?{message:d.message}:{})}:{mode,...(d.draft?{draft:d.draft}:{})},true);},
     exs:(t,id)=>this.pickExample(t,id),
     // composer
     ct:(t,arg)=>CONTEXTS.includes(arg as Ctx)&&t.dlg.step==='compose'?this.compose(t,{...t.dlg.draft,contextType:arg as Ctx}):this.say(t,T.texts.stale),
@@ -203,6 +205,22 @@ export class Flows {
     ha:(t,sid)=>this.showResult(t,sid),
     hr:(t,sid)=>this.withSession(t,sid,s=>this.previewFor(t,{kind:sourceKind(s.input.mode),sessionId:sid,expectedRevision:s.revision})),
     hd:(t,sid)=>this.withSession(t,sid,s=>this.reset(t).then(()=>this.say(t,`Удалить «${T.shortTitle(s.input.title)}»?\n\nИз приложения (и в боте, и на сайте) удалятся ситуация, разборы и практика по ней. Сообщения в этом чате Telegram останутся — их можно удалить только в самом Telegram.`,[[b('Да, удалить','hy',sid),f('Нет','ho',sid)]]))),
+    he:(t,sid)=>this.withSession(t,sid,async s=>{
+      const i=s.input,d:Draft={mode:i.mode,title:i.title,relationship:i.relationship,context:i.context,contextType:i.contextType,goal:i.goal,
+        ...(i.mode==='understand'?{message:i.message,guess:i.guess}:i.mode==='thread'?{turns:i.turns,guess:i.guess}:i.mode==='say_direct'?{draft:i.draft,intent:i.intent}:{draft:i.draft})};
+      this.m(t).editRevision={sessionId:sid,revision:s.revision};
+      await this.go(t,'compose',d,{sessionId:sid,previewId:null,roleplayId:null});
+      const main:Rows=i.mode==='understand'?[[b('Сообщение','hef','message')]]:i.mode==='thread'?[]:[[b('Мой текст','hef','draft')]];
+      return this.say(t,`Что изменить в «${T.shortTitle(i.title)}»? Будет новая версия ${s.revision+1}: прежние разборы останутся, для новой версии нужен новый предпросмотр.`,[...main,[b('Собеседник','hef','relationship'),b('Сфера','hef','contextType')],[b('Контекст','hef','context'),b('Цель','hef','goal')],...(i.mode==='say_direct'?[[b('Что выразить','hef','intent')]]:[]),...('guess' in i?[[b('Моя версия','hef','guess')]]:[]),[b('Отмена','nav','cancel')]]);
+    }),
+    hef:(t,field)=>{
+      const d={...t.dlg.draft} as Record<string,unknown>;
+      if(!this.editingSession(t)||!['message','draft','intent','relationship','contextType','context','goal','guess'].includes(field))return this.say(t,'Правка прервана (например, бот перезапускался). Открой ситуацию из истории и нажми «Изменить» ещё раз.',[[f('История','m','h')]]);
+      if(field==='guess')return this.toGuess(t,t.dlg.draft);
+      delete d[field];return this.compose(t,d as Draft);
+    },
+    hq:t=>{this.m(t).search=true;return this.say(t,'Напиши часть названия для поиска (до 200 символов).',[[f('Отмена','m','h')]]);},
+    xf:(t,arg)=>this.examples(t,CONTEXTS.includes(arg as Ctx)?arg as Ctx:null),
     hy:(t,sid)=>this.withSession(t,sid,async s=>{await this.domain.deleteSession(t.ctx,{id:sid,expectedRevision:s.revision},this.key(t,'delete_session'));await this.say(t,'Удалено из приложения.');return this.history(t,0,null);}),
     // practice, cards, assessment, reminders, web
     pdone:t=>this.completePractice(t),
@@ -219,7 +237,7 @@ export class Flows {
   private async start(t:Turn) {
     if(ready(t.account))return this.menu(t,'С возвращением!');
     await this.say(t,T.texts.greeting);
-    await this.domain.recordStage(t.ctx,{name:'onboarding_started'},this.key(t,'stage')).catch(error=>{if(escalates(error))throw error;});
+    await this.stage(t,'onboarding_started');
     return this.resumeOnboarding(t);
   }
   async resumeOnboarding(t:Turn):Promise<unknown> {
@@ -233,7 +251,7 @@ export class Flows {
       return this.say(t,T.texts.askEmail,[[f('Удалить аккаунт','ac','del')]]);
     }
     t.account=await this.domain.updateAccount(t.ctx,{onboardingCompleted:true},this.key(t,'onboarding'));
-    await this.domain.recordStage(t.ctx,{name:'onboarding_completed'},this.key(t,'stage')).catch(error=>{if(escalates(error))throw error;});
+    await this.stage(t,'onboarding_completed');
     return this.menu(t,'Готово, аккаунт подтверждён.');
   }
   private async acceptConsent(t:Turn) {
@@ -356,12 +374,12 @@ export class Flows {
   // ---------- menu
   private async menuAction(t:Turn,arg:string) {
     switch(arg){
-      case 'u':return this.compose(t,{mode:'understand'});
-      case 'd':return this.compose(t,{mode:'say_direct'});
-      case 'bs':return this.compose(t,{mode:'before_send'});
-      case 'th':return this.compose(t,{mode:'thread'});
+      case 'u':return this.compose(t,{mode:'understand'},true);
+      case 'd':return this.compose(t,{mode:'say_direct'},true);
+      case 'bs':return this.compose(t,{mode:'before_send'},true);
+      case 'th':return this.compose(t,{mode:'thread'},true);
       case 'ex':return this.examples(t);
-      case 'h':return this.history(t,0,null);
+      case 'h':{delete this.m(t).historyQuery;return this.history(t,0,null);}
       case 'p':return this.say(t,T.progress(await this.domain.progress(t.ctx,{})),[[f('Навыки','m','skills'),f('История','m','h')],[toMenu]]);
       case 'skills':{const [p,a]=await Promise.all([this.domain.progress(t.ctx,{}),this.domain.skillAttempts(t.ctx,{limit:10})]);return this.say(t,`${T.progress(p)}\n\nПоследние оценённые попытки:\n${T.attempts(a.items)}`,[[toMenu]]);}
       case 'pd':{const p=await this.domain.dailyPractice(t.ctx,{});return this.say(t,T.practice(p),[[f('Выполнено','pdone')],[toMenu]]);}
@@ -387,8 +405,11 @@ export class Flows {
   }
 
   // ---------- composer (all four modes): one short question per step, state in the DB dialogue
-  private async compose(t:Turn,d:Draft) {
-    await this.go(t,'compose',d,{sessionId:null,previewId:null,roleplayId:null});
+  /** sessionId is kept only while editing a saved situation (dialogue already in compose with that session and a mode). */
+  private editingSession(t:Turn) {const e=this.m(t).editRevision;return e&&t.dlg.sessionId===e.sessionId&&(t.dlg.step==='compose'||t.dlg.step==='guess')&&t.dlg.draft.mode?e.sessionId:null;}
+  private async compose(t:Turn,d:Draft,fresh=false) {
+    if(fresh)delete this.m(t).editRevision;
+    await this.go(t,'compose',d,{sessionId:fresh?null:this.editingSession(t),previewId:null,roleplayId:null});
     const k=nextField(d),back=[b('Назад','nav','back'),b('Отмена','nav','cancel')],cancel=[b('Отмена','nav','cancel')];
     const first=d.mode?ORDER[d.mode].findIndex(x=>x===k)===0:false;
     if(d.mode==='thread'&&!k){
@@ -443,7 +464,7 @@ export class Flows {
   }
   private async toGuess(t:Turn,d:Draft) {
     const {guess:_g,...rest}=d;void _g;
-    await this.go(t,'guess',rest,{sessionId:null,previewId:null,roleplayId:null});
+    await this.go(t,'guess',rest,{sessionId:this.editingSession(t),previewId:null,roleplayId:null});
     return this.say(t,`Сначала твоя версия: что, по-твоему, чувствует собеседник?\n\nНапиши до ${T.limits.emotions} эмоций через запятую — или нажми «Не понимаю». Это нормально.`,[[b('Не понимаю','ns')],[b('Отмена','nav','cancel')]]);
   }
   private async guessInput(t:Turn,text:string) {
@@ -472,13 +493,23 @@ export class Flows {
     else if(d.mode==='thread'){if(!d.turns?.length)return this.say(t,T.texts.stale,menuRows());input={...base,title,mode:'thread',turns:d.turns,guess};}
     else if(d.mode==='say_direct'){if(!d.draft)return this.say(t,T.texts.stale,menuRows());input={...base,title,mode:'say_direct',draft:d.draft,intent:d.intent??''};}
     else{if(!d.draft)return this.say(t,T.texts.stale,menuRows());input={...base,title,mode:'before_send',draft:d.draft};}
-    const session=await this.domain.createSession(t.ctx,input,this.key(t,'create_session'));
+    const editing=this.editingSession(t),expected=this.m(t).editRevision;
+    const session=editing&&expected
+      // expectedRevision is the version the user started editing; a change from the web meanwhile is REVISION_CONFLICT, never overwritten.
+      ?await this.domain.updateSession(t.ctx,{id:editing,expectedRevision:expected.revision,input},this.key(t,'update_session'))
+      :await this.domain.createSession(t.ctx,input,this.key(t,'create_session'));
+    delete this.m(t).editRevision;
     return this.previewFor(t,{kind:sourceKind(d.mode),sessionId:session.id,expectedRevision:session.revision});
   }
 
   // ---------- preview → edit → confirm → startRun (generation only after explicit confirmation of the exact snapshot)
+  /** Allowlisted stage event without text; only infrastructure failures escalate. */
+  private async stage(t:Turn,name:Parameters<ProductFacade['recordStage']>[1]['name'],extra:{contextType?:Ctx;resourceId?:string}={}) {
+    await this.domain.recordStage(t.ctx,{name,...extra},this.key(t,'stage')).catch(error=>{if(escalates(error))throw error;});
+  }
   private async previewFor(t:Turn,source:Source) {
     const p=await this.domain.createPreview(t.ctx,source,this.key(t,'preview'));
+    await this.stage(t,'preview_created',{resourceId:p.id});
     return this.showPreview(t,p);
   }
   private async showPreview(t:Turn,p:Awaited<ReturnType<ProductFacade['preview']>>) {
@@ -512,6 +543,7 @@ export class Flows {
     if(t.dlg.step!=='preview'||!previewId)return this.say(t,T.texts.stale,menuRows());
     const p=await this.domain.preview(t.ctx,{id:previewId});
     const receipt=await this.domain.confirmPreview(t.ctx,{id:p.id,expectedRevision:p.revision,snapshotHash:p.snapshotHash},this.key(t,'confirm'));
+    await this.stage(t,'preview_confirmed',{resourceId:p.id});
     return this.started(t,p.sessionId,this.domain.startRun(t.ctx,{previewId:p.id,previewRevision:receipt.revision,snapshotHash:receipt.snapshotHash,expectedSessionRevision:p.sessionRevision},this.key(t,'start_run')));
   }
   private async started(t:Turn,sessionId:string|null,accepted:Promise<{runId:string;resourceId?:string}>) {
@@ -553,10 +585,12 @@ export class Flows {
   }
 
   // ---------- examples, practice, cards, assessment
-  private async examples(t:Turn) {
-    const page=await this.domain.examples(t.ctx,{limit:10});
-    if(!page.items.length)return this.say(t,'Каталог примеров пока пуст.',[[toMenu]]);
-    return this.say(t,'Выбери вымышленную ситуацию. Разбор сгенерирует настоящая локальная модель — заготовленных ответов нет.',[...page.items.map(e=>[f(`${T.contextLabels[e.input.contextType]} · ${T.shortTitle(e.input.title,30)}`,'exs',e.id)]),[toMenu]]);
+  private async examples(t:Turn,filter:Ctx|null=null) {
+    const page=await this.domain.examples(t.ctx,{limit:10,...(filter?{contextType:filter}:{})});
+    const filters=CONTEXTS.map(c=>f(filter===c?`• ${T.contextLabels[c]}`:T.contextLabels[c],'xf',c));
+    const filterRows=[filters.slice(0,2),filters.slice(2),...(filter?[[f('Все сферы','xf','all')]]:[])];
+    if(!page.items.length)return this.say(t,filter?`В сфере «${T.contextLabels[filter]}» примеров нет.`:'Каталог примеров пока пуст.',[...filterRows,[toMenu]]);
+    return this.say(t,'Выбери вымышленную ситуацию. Разбор сгенерирует настоящая локальная модель — заготовленных ответов нет. Одна и та же фраза может встречаться в разных сферах.',[...page.items.map(e=>[f(`${T.contextLabels[e.input.contextType]} · ${T.shortTitle(e.input.title,30)}`,'exs',e.id)]),...filterRows,[toMenu]]);
   }
   private async pickExample(t:Turn,id:string) {
     const e=await this.domain.example(t.ctx,{id}),i=e.input;
@@ -571,6 +605,7 @@ export class Flows {
   private async completePractice(t:Turn) {
     const p=await this.domain.dailyPractice(t.ctx,{});
     await this.domain.completeDailyPractice(t.ctx,{id:p.id,contentVersion:p.contentVersion},this.key(t,'practice'));
+    await this.stage(t,'practice_completed');
     const progress=await this.domain.progress(t.ctx,{});
     return this.say(t,`Отмечено за ${p.localDate}. Серия: ${progress.streak.current}. Повторное нажатие не засчитывается дважды.`,[[toMenu]]);
   }
@@ -586,6 +621,7 @@ export class Flows {
   private async completeCard(t:Turn,id:string) {
     const c=await this.domain.card(t.ctx,{id});
     await this.domain.completeCard(t.ctx,{id:c.id,contentVersion:c.contentVersion},this.key(t,'card'));
+    await this.stage(t,'card_completed');
     return this.say(t,'Карточка отмечена пройденной.',[[f('Все карточки','m','cards'),toMenu]]);
   }
   private async startAssessment(t:Turn,kind:'baseline'|'followup') {
@@ -608,6 +644,7 @@ export class Flows {
     state.answers.push({questionId:task.id,choiceId:picked.id});
     if(state.answers.length<form.tasks.length){await this.go(t,'assessment');return this.askTask(t,form,taskIndex+1);}
     const result=await this.domain.submitAssessment(t.ctx,{id:form.id,contentVersion:form.contentVersion,answers:state.answers},this.key(t,'assessment'));
+    await this.stage(t,'assessment_completed');
     delete this.m(t).assessment;
     await this.go(t,'menu',{},{sessionId:null,previewId:null,roleplayId:null});
     return this.say(t,T.assessmentResult(result),[[f('Напоминания','m','rem'),toMenu]]);
@@ -620,15 +657,16 @@ export class Flows {
     const known=m.cursors??[null];
     if(page>0&&known[page]===undefined)page=0;
     const cursor=known[page]??undefined;
-    const result=await this.domain.sessions(t.ctx,{limit:HISTORY_PAGE,...(cursor?{cursor}:{}),...(filter?{contextType:filter}:{})});
+    const q=m.historyQuery;
+    const result=await this.domain.sessions(t.ctx,{limit:HISTORY_PAGE,...(cursor?{cursor}:{}),...(filter?{contextType:filter}:{}),...(q?{q}:{})});
     const next=known.slice(0,page+1);if(result.nextCursor)next[page+1]=result.nextCursor;m.cursors=next;
     const filters=CONTEXTS.map(c=>f(filter===c?`• ${T.contextLabels[c]}`:T.contextLabels[c],'hf',c));
-    if(!result.items.length&&page===0)return this.say(t,filter?`В сфере «${T.contextLabels[filter]}» записей нет.`:'Пока нет сохранённых разборов.',[filters.slice(0,2),filters.slice(2),...(filter?[[f('Все сферы','hf','all')]]:[]),[f('Понять сообщение','m','u'),f('Пример','m','ex')],[toMenu]]);
+    if(!result.items.length&&page===0)return this.say(t,q?`По запросу «${q}» ничего не найдено.`:filter?`В сфере «${T.contextLabels[filter]}» записей нет.`:'Пока нет сохранённых разборов.',[...(q?[[f('Сбросить поиск','m','h')]]:[]),filters.slice(0,2),filters.slice(2),...(filter?[[f('Все сферы','hf','all')]]:[]),[f('Понять сообщение','m','u'),f('Пример','m','ex')],[toMenu]]);
     const n=(i:number)=>page*HISTORY_PAGE+i+1;
     const lines=result.items.map((s,i)=>`${n(i)}. ${T.shortTitle(s.input.title)} · ${T.modeLabels[s.input.mode]} — ${new Date(s.updatedAt).toLocaleDateString('ru-RU',{timeZone:'UTC'})}`);
     const navRow=[...(page>0?[f('← Назад','hn',String(page-1))]:[]),...(result.nextCursor?[f('Дальше →','hn',String(page+1))]:[])];
-    return this.say(t,`История${filter?` · ${T.contextLabels[filter]}`:''} · страница ${page+1}\nОбщая для бота и сайта.\n\n${lines.join('\n')}`,[
-      ...result.items.map((s,i)=>[f(`${n(i)}. ${T.shortTitle(s.input.title,40)}`,'ho',s.id)]),...(navRow.length?[navRow]:[]),filters.slice(0,2),filters.slice(2),...(filter?[[f('Все сферы','hf','all')]]:[]),[toMenu]]);
+    return this.say(t,`История${filter?` · ${T.contextLabels[filter]}`:''}${q?` · «${q}»`:''} · страница ${page+1}\nОбщая для бота и сайта.\n\n${lines.join('\n')}`,[
+      ...result.items.map((s,i)=>[f(`${n(i)}. ${T.shortTitle(s.input.title,40)}`,'ho',s.id)]),...(navRow.length?[navRow]:[]),filters.slice(0,2),filters.slice(2),...(filter?[[f('Все сферы','hf','all')]]:[]),[f(q?'Сбросить поиск':'Поиск по названию',q?'m':'hq',q?'h':undefined)],[toMenu]]);
   }
   private async openSession(t:Turn,sid:string) {
     const s=await this.domain.session(t.ctx,{id:sid}),i=s.input;
@@ -641,7 +679,7 @@ export class Flows {
       if(main.kind==='analysis')rows.push([f('Как уточнить?','cl',main.id),f('Написать ответ','rw',sid)],[f('Упражнение','xs',sid),f(role?'Продолжить разговор':'Потренировать разговор',role?'rc':'rp',sid)]);
     }else if(main?.status==='failed')rows.push([f('Повторить','rt',main.id)]);
     else if(!main)rows.push([f('Подготовить разбор','hr',sid)]);
-    rows.push([f('Удалить','hd',sid),f('К истории','m','h')]);
+    rows.push([f('Изменить','he',sid),f('Удалить','hd',sid)],[f('К истории','m','h')]);
     const body=i.mode==='understand'?`Сообщение: «${i.message}»`:i.mode==='thread'?i.turns.map(x=>`${x.speaker==='self'?'Я':'Собеседник'}: ${x.text}`).join('\n'):`Мой текст: «${i.draft}»`;
     return this.say(t,`${i.title} · ${T.modeLabels[i.mode]}\n${new Date(s.updatedAt).toLocaleString('ru-RU',{timeZone:'UTC'})} UTC\n\n${body}\nСобеседник: ${i.relationship}\nСфера: ${T.contextLabels[i.contextType]}\nЦель: ${T.goalLabels[i.goal]}${i.context?`\nКонтекст: ${i.context}`:''}\n\n${status}`,rows);
   }

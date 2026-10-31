@@ -6,6 +6,7 @@ import {Button,Loading,Notice} from '../../components/ui';
 import {api,errorText,newKey} from '../../lib/api';
 import {kindLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
+import {recordStage} from '../../lib/stage';
 
 type Pv=z.infer<typeof Preview>;
 
@@ -46,6 +47,7 @@ export function PreviewPage({id}:{id:string}) {
     setBusy('send');setError(null);
     try{
       const receipt=await api('confirmPreview',{id:preview.id,expectedRevision:preview.revision,snapshotHash:preview.snapshotHash},{key:keys.current.confirm});
+      recordStage('preview_confirmed',{resourceId:preview.id});
       const run=await api('startRun',{previewId:preview.id,previewRevision:receipt.revision,snapshotHash:receipt.snapshotHash,expectedSessionRevision:preview.sessionRevision},{key:keys.current.start});
       navigate(`/runs/${run.runId}`,{replace:true});
     }catch(e){setError(errorText(e));setBusy(null);}

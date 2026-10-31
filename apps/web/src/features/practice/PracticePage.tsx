@@ -6,6 +6,7 @@ import {Button,Loading,Notice,TextArea} from '../../components/ui';
 import {api,errorText,isApiError,newKey} from '../../lib/api';
 import {skillLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
+import {recordStage} from '../../lib/stage';
 
 type Form=z.infer<typeof AssessmentForm>;type Result=z.infer<typeof AssessmentResult>;
 
@@ -13,7 +14,7 @@ function Daily() {
   const p=useAsync(signal=>api('dailyPractice',{},{signal}),[]);
   const [done,setDone]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);const [busy,setBusy]=useState(false);
   if(!p.data)return p.loading?<Loading label="Загружаем практику дня"/>:<Notice tone="error">{errorText(p.error)}</Notice>;
-  const complete=async()=>{setBusy(true);setError(null);try{const c=await api('completeDailyPractice',{id:p.data!.id,contentVersion:p.data!.contentVersion},{key:newKey()});setDone(c.localDate);}catch(e){setError(errorText(e));}finally{setBusy(false);}};
+  const complete=async()=>{setBusy(true);setError(null);try{const c=await api('completeDailyPractice',{id:p.data!.id,contentVersion:p.data!.contentVersion},{key:newKey()});setDone(c.localDate);recordStage('practice_completed');}catch(e){setError(errorText(e));}finally{setBusy(false);}};
   return (
     <section className="card" aria-label="Практика дня">
       <h2>Практика дня <span className="badge">{skillLabels[p.data.skill]}</span></h2>
@@ -43,7 +44,7 @@ function CardDetail({id,onDone}:{id:string;onDone():void}) {
   const [answer,setAnswer]=useState('');const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
   if(!c.data)return c.loading?<Loading label="Открываем"/>:<Notice tone="error">{errorText(c.error)}</Notice>;
   const card=c.data;
-  const complete=async()=>{setBusy('done');setError(null);try{await api('completeCard',{id:card.id,contentVersion:card.contentVersion},{key:newKey()});c.reload();onDone();}catch(e){setError(errorText(e));}finally{setBusy(null);}};
+  const complete=async()=>{setBusy('done');setError(null);try{await api('completeCard',{id:card.id,contentVersion:card.contentVersion},{key:newKey()});recordStage('card_completed');c.reload();onDone();}catch(e){setError(errorText(e));}finally{setBusy(null);}};
   const tryIt=async()=>{setBusy('try');setError(null);try{const p=await api('createPreview',{kind:'card_feedback',cardId:card.id,contentVersion:card.contentVersion,answer:answer.trim()},{key:newKey()});navigate(`/previews/${p.id}`);}catch(e){setError(errorText(e));setBusy(null);}};
   return (
     <div className="mark-detail">
@@ -64,7 +65,7 @@ function Assessment() {
   const open=async(k:'baseline'|'followup')=>{setKind(k);setError(null);setResult(null);setBusy(true);
     try{const f=await api('assessment',{kind:k});setForm(f);setAnswers({});}catch(e){setForm(null);setError(isApiError(e,'ASSESSMENT_NOT_DUE')?'Повторный тест откроется через 7 дней после входного.':errorText(e));}finally{setBusy(false);}};
   const submit=async()=>{if(!form)return;setBusy(true);setError(null);
-    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,answers:form.tasks.map(t=>({questionId:t.id,choiceId:answers[t.id]!}))},{key}));setForm(null);}
+    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,answers:form.tasks.map(t=>({questionId:t.id,choiceId:answers[t.id]!}))},{key}));recordStage('assessment_completed');setForm(null);}
     catch(e){setError(errorText(e));}finally{setBusy(false);}};
   return (
     <section className="card" aria-label="Тест до и после">

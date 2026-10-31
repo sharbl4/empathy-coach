@@ -140,7 +140,8 @@ export class FakeProduct {
     if(x!.code!==input.code){x!.attempts--;if(x!.attempts<=0)x!.state='locked';fail('CODE_INVALID');}
     return this.once(ctx,key,input,()=>{x!.active=false;a.emailVerified=true;return {account:{...a},verification:{state:'verified' as const}};});
   }
-  async recordStage(ctx:UserContext) {this.enter('recordStage',ctx);return null;}
+  stages:unknown[]=[];
+  async recordStage(ctx:UserContext,input:unknown) {this.enter('recordStage',ctx);this.stages.push(input);return null;}
   async deleteData(ctx:UserContext,input:unknown,key:string) {this.enter('deleteData',ctx);return this.once(ctx,key,input,()=>{for(const [id,s] of this.store)if(s.owner===ctx.accountId)this.store.delete(id);return null;});}
   async deleteAccount(ctx:UserContext,input:unknown,key:string) {this.enter('deleteAccount',ctx);return this.once(ctx,key,input,()=>{for(const [id,s] of this.store)if(s.owner===ctx.accountId)this.store.delete(id);this.accounts.delete(ctx.accountId);this.dialogues.delete(ctx.accountId);return null;});}
 
@@ -164,9 +165,9 @@ export class FakeProduct {
     this.learning('createSession',ctx);
     return this.once(ctx,key,input,()=>{const s={owner:ctx.accountId,id:randomUUID(),input:structuredClone(input),revision:1,createdAt:now(),updatedAt:now()};this.store.set(s.id,s);return this.session_(s);});
   }
-  async sessions(ctx:UserContext,q:{cursor?:string;limit:number;contextType?:string}) {
+  async sessions(ctx:UserContext,q:{cursor?:string;limit:number;contextType?:string;q?:string}) {
     this.learning('sessions',ctx);
-    const all=[...this.store.values()].filter(s=>s.owner===ctx.accountId&&(!q.contextType||s.input.contextType===q.contextType)).reverse();
+    const all=[...this.store.values()].filter(s=>s.owner===ctx.accountId&&(!q.contextType||s.input.contextType===q.contextType)&&(!q.q||s.input.title.toLowerCase().includes(q.q.toLowerCase()))).reverse();
     const start=q.cursor?Number(q.cursor):0;
     return {items:all.slice(start,start+q.limit).map(s=>this.session_(s)),nextCursor:start+q.limit<all.length?String(start+q.limit):null};
   }
@@ -174,6 +175,10 @@ export class FakeProduct {
     this.learning('session',ctx);const s=this.owned(ctx,q.id);
     const runs=[...this.runs.values()].filter(r=>r.owner===ctx.accountId&&r.run.sessionId===s.id).map(r=>structuredClone(r.run)).reverse();
     return {...this.session_(s),runs:{items:runs,nextCursor:null},roleplays:await this.roleplays(ctx,{sessionId:s.id,limit:20})};
+  }
+  async updateSession(ctx:UserContext,input:{id:string;expectedRevision:number;input:Input},key:string) {
+    this.learning('updateSession',ctx);
+    return this.once(ctx,key,input,()=>{const s=this.owned(ctx,input.id);if(s.revision!==input.expectedRevision)fail('REVISION_CONFLICT');s.input=structuredClone(input.input);s.revision++;s.updatedAt=now();return this.session_(s);});
   }
   async deleteSession(ctx:UserContext,input:{id:string;expectedRevision:number},key:string) {this.learning('deleteSession',ctx);return this.once(ctx,key,input,()=>{const s=this.owned(ctx,input.id);if(s.revision!==input.expectedRevision)fail('REVISION_CONFLICT');this.store.delete(input.id);return null;});}
   async roleplays(ctx:UserContext,q:{sessionId:string;limit:number}) {this.learning('roleplays',ctx);this.owned(ctx,q.sessionId);return {items:[...this.roles.values()].filter(r=>r.owner===ctx.accountId&&r.role.sessionId===q.sessionId).map(r=>structuredClone(r.role)).reverse(),nextCursor:null};}
@@ -236,7 +241,7 @@ export class FakeProduct {
 
   // ---- catalogue content
   examplesList:z.infer<typeof Example>[]=[{id:'ok-close',version:'1',input:{mode:'understand',title:'«Ок.»',relationship:'Друг',context:'Ответ на длинное сообщение',contextType:'close',goal:'clarify',message:'Ок.',guess:{emotions:[],quotes:[],unsure:true}}}];
-  async examples(ctx:UserContext) {this.learning('examples',ctx);return {items:structuredClone(this.examplesList),nextCursor:null};}
+  async examples(ctx:UserContext,q:{contextType?:string}) {this.learning('examples',ctx);return {items:structuredClone(this.examplesList.filter(e=>!q.contextType||e.input.contextType===q.contextType)),nextCursor:null};}
   async example(ctx:UserContext,q:{id:string}) {this.learning('example',ctx);const e=this.examplesList.find(x=>x.id===q.id);if(!e)fail('NOT_FOUND');return structuredClone(e!);}
   async progress(ctx:UserContext) {this.learning('progress',ctx);const done=[...this.runs.values()].filter(r=>r.owner===ctx.accountId&&r.run.status==='succeeded');
     return {analyzedSessions:done.filter(r=>r.run.kind==='analysis').length,completedExercises:0,completedRoleplays:0,completedDailyPractices:[...this.completions].filter(x=>x.startsWith(`${ctx.accountId}:practice`)).length,completedCards:0,streak:{current:this.completions.size?1:0,best:1,lastCompletedLocalDate:null},skills:[{skill:'clarification' as const,completedAttempts:2,latestScore:1}],latestTip:null,followupEligibleAt:null};}

@@ -9,6 +9,9 @@ import {contextLabels,difficultyLabels,formatDate,goalLabels,kindLabels,modeLabe
 import {useAsync} from '../../lib/useAsync';
 import {sourceKind} from '../preview/source';
 import {RunResult} from '../runs/RunResult';
+import {EditSession} from './EditSession';
+import {recordStage} from '../../lib/stage';
+import type {RunV2} from '@between/contracts/product';
 
 type Source=z.infer<typeof PreviewSource>;type Level=z.infer<typeof Difficulty>;
 
@@ -16,6 +19,8 @@ export function SessionPage({id}:{id:string}) {
   const detail=useAsync(signal=>api('session',{id},{signal}),[id]);
   const [draft,setDraft]=useState('');const [answer,setAnswer]=useState('');const [level,setLevel]=useState<Level>('calm');
   const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);const [confirmDelete,setConfirmDelete]=useState(false);
+  const [editing,setEditing]=useState(false);
+  const [moreRuns,setMoreRuns]=useState<{items:z.infer<typeof RunV2>[];cursor:string|null}|null>(null);
   if(detail.loading&&!detail.data)return <Loading label="Загружаем ситуацию"/>;
   if(!detail.data)return <Notice tone="error" action={<Button variant="secondary" onClick={detail.reload}>Повторить</Button>}>{errorText(detail.error)}</Notice>;
   const s=detail.data,i=s.input;
@@ -25,8 +30,12 @@ export function SessionPage({id}:{id:string}) {
   const exercise=current.find(r=>r.kind==='exercise'&&r.status==='succeeded');
   const preview=async(name:string,source:Source)=>{
     setBusy(name);setError(null);
-    try{const p=await api('createPreview',source,{key:newKey()});navigate(`/previews/${p.id}`);}
+    try{const p=await api('createPreview',source,{key:newKey()});recordStage('preview_created',{contextType:i.contextType,resourceId:p.id});navigate(`/previews/${p.id}`);}
     catch(e){setError(errorText(e));setBusy(null);}
+  };
+  const loadMore=async()=>{
+    const cursor=moreRuns?moreRuns.cursor:s.runs.nextCursor;if(!cursor)return;
+    try{const page=await api('runs',{sessionId:s.id,cursor,limit:20});setMoreRuns({items:[...(moreRuns?.items??[]),...page.items],cursor:page.nextCursor});}catch(e){setError(errorText(e));}
   };
   const remove=async()=>{
     setBusy('delete');setError(null);
@@ -37,7 +46,8 @@ export function SessionPage({id}:{id:string}) {
   const base={sessionId:s.id,expectedRevision:s.revision};
   return (
     <>
-      <div className="page-head"><h1>{i.title}</h1><Button variant="danger" onClick={()=>setConfirmDelete(true)}>Удалить</Button></div>
+      <div className="page-head"><h1>{i.title}</h1><div className="actions"><Button variant="secondary" onClick={()=>setEditing(true)}>Изменить</Button><Button variant="danger" onClick={()=>setConfirmDelete(true)}>Удалить</Button></div></div>
+      {editing&&<EditSession session={s} onCancel={()=>setEditing(false)} onSaved={()=>{setEditing(false);setMoreRuns(null);detail.reload();}}/>}
       <p className="small muted">{modeLabels[i.mode]} · обновлено {formatDate(s.updatedAt)} · версия {s.revision}</p>
       {body}
       <dl className="meta"><dt>Собеседник</dt><dd>{i.relationship}</dd><dt>Сфера</dt><dd>{contextLabels[i.contextType]}</dd><dt>Цель</dt><dd>{goalLabels[i.goal]}</dd>{i.context&&<><dt>Контекст</dt><dd>{i.context}</dd></>}{i.mode==='say_direct'&&i.intent&&<><dt>Что выразить</dt><dd>{i.intent}</dd></>}</dl>
@@ -70,7 +80,7 @@ export function SessionPage({id}:{id:string}) {
           <Button variant="secondary" busy={busy==='role'} onClick={()=>void preview('role',{kind:'roleplay_start',...base,difficulty:level})}>Начать тренировку</Button></div>
         {s.roleplays.items.length>0&&<ul>{s.roleplays.items.map(r=><li key={r.id}><Link to={`/roleplays/${r.id}`}>{difficultyLabels[r.difficulty]} · {r.status==='active'?`ответов ${r.turnCount}/3 — продолжить`:'завершена'}</Link></li>)}</ul>}
       </section>}
-      {current.length>0&&<section className="card"><h2>Все запросы этой версии</h2><ul>{current.map(r=><li key={r.id}><Link to={`/runs/${r.id}`}>{kindLabels[r.kind]}</Link> · {r.status==='succeeded'?'готово':r.status==='failed'?'не удалось':'выполняется'}</li>)}</ul></section>}
+      {current.length>0&&<section className="card"><h2>Все запросы этой версии</h2><ul>{[...current,...(moreRuns?.items??[]).filter(r=>r.revision===s.revision)].map(r=><li key={r.id}><Link to={`/runs/${r.id}`}>{kindLabels[r.kind]}</Link> · {r.status==='succeeded'?'готово':r.status==='failed'?'не удалось':'выполняется'}</li>)}</ul>{(moreRuns?moreRuns.cursor:s.runs.nextCursor)&&<Button variant="secondary" onClick={()=>void loadMore()}>Показать ещё</Button>}</section>}
       <Modal open={confirmDelete} title="Удалить ситуацию?" onClose={()=>setConfirmDelete(false)} actions={<><Button variant="danger" busy={busy==='delete'} onClick={()=>void remove()}>Удалить</Button><Button variant="secondary" onClick={()=>setConfirmDelete(false)}>Отмена</Button></>}>
         <p>Удалятся ситуация, разборы и практика по ней — и на сайте, и в боте. Сообщения в чате Telegram останутся, их можно удалить только в Telegram.</p>
       </Modal>

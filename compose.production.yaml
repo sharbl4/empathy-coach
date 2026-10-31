@@ -1,5 +1,5 @@
 # One immutable image built in CI/on PC; never build on the 1CPU/2GB VM.
-# Example bootstrap: set PG_PASSWORD and BOT_IMAGE only in hosting/ignored env.
+# Example bootstrap: set PG_PASSWORD and APP_IMAGE only in hosting/ignored env.
 name: between
 services:
   db:
@@ -21,8 +21,11 @@ services:
     cpus: 0.25
     logging:
       driver: none
-  bot:
-    image: ${BOT_IMAGE:?Set an immutable CI/PC-built tag or digest}
+    networks:
+      private:
+        ipv4_address: 172.30.23.4
+  app:
+    image: ${APP_IMAGE:?Set an immutable CI/PC-built tag or digest}
     restart: unless-stopped
     init: true
     depends_on:
@@ -38,13 +41,22 @@ services:
       LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:?Set endpoint authentication key}
       AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-90000}
       AI_MAX_CONCURRENCY: 1
+      AI_MAX_QUEUE_LENGTH: 8
       SMTP_HOST: ${SMTP_HOST:?Set SMTP host}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:?Set sender email}
       EMAIL_CODE_SECRET: ${EMAIL_CODE_SECRET:?Set unique random hex secret}
-    mem_limit: 512m
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set actual HTTPS origin}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:?Set independent random hex secret}
+      WEB_LINK_SECRET: ${WEB_LINK_SECRET:?Set independent random hex secret}
+      PORT: 3000
+      TRUSTED_PROXY_IPS: 172.30.23.2
+    networks:
+      private:
+        ipv4_address: 172.30.23.3
+    mem_limit: 640m
     cpus: 0.65
     pids_limit: 128
     read_only: true
@@ -52,9 +64,33 @@ services:
       - /tmp:size=16m,mode=1777
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    stop_grace_period: 110s
+    stop_grace_period: 120s
     logging:
       driver: none
+  proxy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set actual HTTPS origin}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      private:
+        ipv4_address: 172.30.23.2
+    mem_limit: 64m
+    cpus: 0.10
+    logging:
+      driver: none
+networks:
+  private:
+    ipam:
+      config:
+        - subnet: 172.30.23.0/29
 volumes:
+  caddy_data:
+  caddy_config:
   # Separate name: does not delete/replace the old development volume.
   pgdata:

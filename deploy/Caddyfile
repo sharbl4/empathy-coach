@@ -1,0 +1,8 @@
+{
+    log default {
+        output discard
+    }
+}
+{$WEB_ORIGIN} {
+    reverse_proxy app:3000
+}

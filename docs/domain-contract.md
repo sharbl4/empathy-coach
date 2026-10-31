@@ -1,3 +1,5 @@
+> ARCHIVE v1: Telegram-only instructions replaced by web+Telegram v2. See contract-v2.md and handoff-v2.md. Historical signatures are not current.
+
 # Telegram domain boundary 1.0.0 · 31.10.2026
 
 Источник DTO и **точных сигнатур**: `packages/contracts/src/domain.ts`, экспорт `@between/contracts/domain`. Версия нового протокола — TELEGRAM_CONTRACT_VERSION=1.0.0; версия npm-пакета пока сохраняется для совместимости сохранённого архивного кода. Старые HTTP api/Me — архив, не новый transport.

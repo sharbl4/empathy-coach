@@ -1,3 +1,5 @@
+> ARCHIVE v1: Telegram-only instructions replaced by web+Telegram v2. See contract-v2.md and handoff-v2.md. Historical signatures are not current.
+
 # Передача foundation
 
 ## Актуальная передача Telegram-only · 31.10.2026

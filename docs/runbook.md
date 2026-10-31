@@ -1,71 +1,45 @@
-# Runbook QQCloud + домашний Windows
+# Runbook: один app, PostgreSQL, HTTPS, домашняя модель
 
-31.10.2026. Инфраструктура подготовлена как кандидат; cloud access, домашний GPU, Tailscale, SMTP и test bot не предоставлены для реального прогона. Полный запуск зависит от #15/#16. Не считать команды ниже уже выполненными на QQCloud.
+Решение31.10.2026 web+Telegram заменяет Telegram-only. Команды ниже подготовлены для Linux Docker Compose; на QQCloud пока НЕ выполнялись. Полный build заблокирован B1/B2/C1. Секреты/старые .env/IDE не перезаписывать.
 
-## 1. До установки
+## До установки
 
-Подтвердить фактический дата-центр/условия обработки QQCloud и домашнего ПК, права оператора/SMTP/Telegram, retention и backup. Настроить отдельный test bot и test DB; production token не использовать для разработки. Политика/согласие требуют актуализации под Telegram-only и утверждения до публичного сбора.
+Получить у организаторов: ОС/SSH; постоянный процесс и диск; Docker или совместимый container runtime; RAM/CPU/disk; исходящий Telegram/SMTP/Tailscale; входящие80/443; backup; подтверждённую страну DC. Бот привязки доменов не подтверждает VM/Docker. Уточнить условия обработки QQCloud, Telegram, SMTP и домашнего ПК для публичного запуска. Документы о прежнем Supabase/GigaChat не подтверждают соответствие новой системы закону.
+Отдельные dev/test/prod DB, bot tokens, три независимых auth/code secrets. Не связывать старые аккаунты по email. Сохранить все применённые миграции/данные.
+Установить Docker Engine/Compose plugin по официальной инструкции для выданной ОС. Проверить collision subnet172.30.23.0/29 с host/Tailscale routes; при collision согласованно поменять сеть, три адреса и TRUSTED_PROXY_IPS. Пример CIDR не факт облачной сети.
 
-На выданной VM проверить cat /etc/os-release, свободный диск, RAM/CPU и SSH-доступ. Установить поддерживаемый Docker Engine/Compose plugin по официальной инструкции для её ОС; не собирать модель/образ на VM2GB. SSH доступ владельца не перекрывать при настройке provider firewall. Внешние порты приложения/PG не нужны. Tailscale и model setup — [local-model.md](local-model.md).
+## Сборка и secrets
 
-## 2. Build и секреты
+На ПК/CI: npm ci; npm run lint; npm run test:contracts; npm run build; npm run typecheck; реальные DB/browser tests из CI. docker build -t <registry/image:immutable-commit> .; push после авторизации владельца. На VM не собирать.
+Создать закрытый каталог, env с chmod600 и заполнить поля .env.example вручную. Deploy добавляет PG_PASSWORD, APP_IMAGE immutable tag/digest; DATABASE_URL с private db:5432, password URI-encoded; WEB_ORIGIN ровно https://фактический-домен без path. Значения в чат/логи не выводить.
+EMAIL_CODE_SECRET, WEB_SESSION_SECRET, WEB_LINK_SECRET — разные random32bytes hex. Не выводить генерацию в терминал с записью экрана; записать непосредственно в secret store/env. LOCAL_LLM_API_KEY перенести из endpoint.key приватно. .env приложения не Vite env; VITE_PUBLIC_* только presentation. Старые Supabase/GigaChat поля не попадают в child runtime через root launcher.
 
-После интеграции фасады/transport и зелёного CI на ПК:
+## Миграции и первый запуск
 
-```sh
-npm ci
-npm run build
-docker build -t between-telegram:<verified-commit> .
-docker save -o between-telegram.tar between-telegram:<verified-commit>
-```
+Обозначение dc ниже: docker compose --env-file /private/path/prod.env -f compose.production.yaml.
+dc pull; dc up -d db. Сделать backup до изменения schema. Затем **dc run --rm --no-deps app node apps/api/dist/db/migrate.js**: это только мигратор, без polling/HTTP. Не применять новые миграции, пока Дима не поставил/проверил их на отдельной test DB.
+dc up -d app proxy. Никогда не scale app; один poller фактического botId и DB lease. Dev/test процесс с production token предварительно остановить. Telegram conflict409 — проверить другие машины, не очищать inbox/offset.
+DNS A/AAAA указывает на реальный сервер (не оставлять нерабочий AAAA). Caddy2.11.7 принимает80/443 и получает сертификат; актуальный WEB_ORIGIN обязателен. Не публиковать3000/5432/8080. PG только bridge, модель только Tailnet IP. Проверить публичные HTTPS chain/redirect, web auth callback/Origin, Secure HttpOnly SameSite=Lax __Host- cookies, отсутствие wildcard CORS.
+Fastify доверяет только172.30.23.2. Внешний X-Forwarded-For не identity; доступ к app напрямую отсутствует. Если площадка имеет собственный proxy — сначала проверить его точные адреса/forwarding, не ставить trustProxy=true.
+Caddy access/error URL logs отключены; Docker logging none. Приложение пишет только allowlisted безопасные коды/метрики, никогда URL auth, headers, cookies, payload/SMTP/модельные ответы. Не включать debug для диагностики.
 
-Перенести проверенный tar по SSH, сверить SHA256, docker load -i between-telegram.tar на VM. Либо использовать согласованный private registry и immutable digest. Не использовать latest для отката. CI строит image и проверяет dependency closure; image не публикуется автоматически без настроенного registry.
+## Health, RAM и очередь
 
-В hosting env/ignored файле .env.production задать все поля .env.example. Дополнительные deploy-поля: BOT_IMAGE=проверенный тег/digest, PG_PASSWORD=отдельный URL-safe случайный пароль. DATABASE_URL должен указывать на db:5432/empathy внутри compose, пароль URL-encode. Один bot token — один poller; local dev/test не запускают production token. EMAIL_CODE_SECRET — отдельные≥32random bytes hex. LOCAL_LLM_API_KEY переносит владелец из Windows endpoint.key. Никаких значений в Git/chat/argv.
+Health требует DB/HTTP/polling/workers/scheduler, heartbeat не старше120s; модель offline не выключает чтение истории/аккаунта/карточек. Docker restart срабатывает при завершении процесса; одна только unhealthy отметка сама не перезапускает контейнер. Domain shutdownSignal/lease loss/polling finished обязаны завершать общий процесс.
+Shutdown: stopAccepting, polling/HTTP close, drain/abort workers/model, DB/pool/leases close; общий deadline110s, compose grace120s. Partial start освобождает уже открытые ресурсы.
+Начальные caps app640MiB/db512MiB/proxy64MiB, pg pool5, max_connections20, shared_buffers64MB, work_mem2MB, GPU concurrency1/queue8. Эти caps — гипотеза. Во время одновременных HTTP+polling+напоминаний+модельных запросов выполнить **node scripts/measure-resources.mjs /private/path/prod.env 60** на host, записать workload/N/peak/host available, OOM/restarts/queue latency. Сохранить запас ОС, не объявлять2ГБ достаточными до замеров.
 
-Compose передаёт bot только актуальные параметры явно, не весь старый .env с Supabase/GigaChat. Проверять config только с --quiet, иначе секреты могут попасть в вывод.
+## Backup, restore и rollback
 
-## 3. Первый запуск и restart
+Backup содержит пользовательские данные: закрытое хранилище, шифрование/retention/доступ владельца. В Linux shell в защищённом каталоге с umask077:
+dc exec -T db pg_dump -U empathy -Fc empathy > backup.dump
+Проверка **в отдельной новой БД**: dc exec -T db createdb -U empathy empathy_restore_test_20261031; dc exec -T db pg_restore --exit-on-error -U empathy -d empathy_restore_test_20261031 < backup.dump.
+Проверить schema/migration versions, row counts/constraints и synthetic read без вывода содержимого. Никогда не restore поверх production. Сделать новую restore-test DB для нового прогона; не использовать --clean против production.
+Update: сохранить предыдущий APP_IMAGE/schema version/backup; dc stop app; миграции; указать новый immutable image; dc up -d app proxy; проверить health/checkpoint. При совместимой additive schema вернуть предыдущий image. При несовместимой — остановить app и согласовать отдельную восстановленную DB; не переписывать применённые migration и не делать blind down.
+Stop: dc stop app proxy db. Не выполнять down -v: pgdata постоянный. После host reboot проверить persistent disk/volumes, health, ровно один poller, HTTPS, shared history; не считать restart policy доказательством.
 
-```sh
-docker compose --env-file .env.production -f compose.production.yaml config --quiet
-docker compose --env-file .env.production -f compose.production.yaml up -d db
-# Review new migrations and take backup first. No automatic destructive rollback.
-docker compose --env-file .env.production -f compose.production.yaml run --rm --no-deps bot node apps/api/dist/db/migrate.js
-docker compose --env-file .env.production -f compose.production.yaml up -d bot
-docker compose --env-file .env.production -f compose.production.yaml ps
-```
+## Домашний ПК и live-приёмка
 
-Не scale bot. При намеренном restart сначала stop bot, дождаться release lease, затем up -d bot. Потеря DB lease останавливает poller; Telegram409 — ошибка оператора о втором poller, не повод скрыто обходить lease. Health без HTTP: heartbeat в /tmp/between-bot-health.json, актуальные database/pollerLease/polling, TTL120s и живой PID. Дима/Даня должны реализовать фактическое обновление; наличие health script не создаёт heartbeat само.
-
-При sleep/отключении Windows новая генерация должна завершиться понятной ошибкой, история — сохраниться. Владелец при необходимости сам временно отключает сон на питании от сети на время демо и возвращает прежнюю настройку после; скрипты не меняют power policy. После перезагрузки ПК владелец повторяет Tailscale/status, Start-Model, model probe и доступ cloud→model. После перезагрузки VM проверить PG health, один poller, согласие/email/историю и отсутствие повторной генерации interrupted run.
-
-## 4. Backup / restore
-
-Не использовать --clean/удаление volumes на рабочей БД. Backup сохранять в закрытом российском хранилище по утверждённому сроку/шифрованию; дамп содержит пользовательские данные, в Git/чат его не передавать. Команды на Linux VM (не PowerShell5 redirection для бинарного dump):
-
-```sh
-umask 077
-docker compose --env-file .env.production -f compose.production.yaml exec -T db pg_dump -U empathy -d empathy -Fc > backup.dump
-docker compose --env-file .env.production -f compose.production.yaml exec -T db createdb -U empathy empathy_restore_test
-docker compose --env-file .env.production -f compose.production.yaml exec -T db pg_restore -U empathy -d empathy_restore_test --exit-on-error < backup.dump
-docker compose --env-file .env.production -f compose.production.yaml exec -T db psql -U empathy -d empathy_restore_test -c 'SELECT count(*) FROM app.schema_migrations'
-```
-
-Restore только в новую отдельную БД; затем проверить структуру, количества и выборочную ownership/revision/history через фасаду без второго poller того же token. Повторить удаления, произошедшие после snapshot, до выдачи данных пользователю. Новый restore test name выбирать, не перезаписывать существующую БД. Положительный count не заменяет проверку восстановления функций.
-
-## 5. Ресурсы и ошибки
-
-Начальные caps bot512MiB/db512MiB, max_connections20, shared_buffers64MB/work_mem2MB, AI concurrency1. Pool target5 с учётом lease; Дима фиксирует фактическое значение. Нужен реальный замер docker stats и MemAvailable host под согласованной нагрузкой, peak и запас ОС. При OOM пересмотреть потребление, не считать restart policy исправлением.
-
-Для автоматической выборки на самом Linux-хосте с Node24 (не внутри контейнера): `node scripts/measure-resources.mjs .env.production 30` во время согласованной нагрузки. Отчёт содержит только количество samples, peak bot+db bytes и минимальный MemAvailable, без конфигурации/контента. Сам helper учитывается в памяти ОС; наличие 30 idle samples не подтверждает нагрузку, workloadVerified остаётся false до привязки к реальному прогону.
-
-Контейнерные логи не сохраняются (driver none) для исключения утечек; диагностировать safe health/exit/OOM counters. Не включать raw debug/request/model logs для удобства. Сырые SQL/SMTP/Telegram ошибки пользователю не передаются.
-
-## 6. Stop / rollback / live
-
-stop bot останавливает polling, ждёт close/cancel; DB остаётся с volume. Остановить модель отдельным Stop-Model, firewall не отключать. Rollback: stop bot, вернуть предыдущий совместимый BOT_IMAGE, up -d; SQL вниз не откатывать, volume не удалять. Совместимость новых миграций со старым image проверять до релиза.
-
-Финальный тест с чужого телефона: /start → consent/email → ситуация → гипотеза → LLM → остальные учебные шаги/say_direct → history. Restart bot/DB → сохранённый результат. Отключить model PC → понятная ошибка → восстановить → явный retry. Проверить второй аккаунт/группу/старые callback и отказ постороннему сетевому узлу.
-
-В отчёт только commit/model hash/версия/N/p50/p95/failed/VRAM/RAM/direct-or-relay; никаких текстов/адресов/кодов/токенов. На текущую дату N=0, показатели не измерены, live не пройден.
+[local-model.md](local-model.md): владелец запускает другую Windows машину, принимает Gemma terms, проверяет драйвер/VRAM, устанавливает два кандидата, firewall/ACL и endpoint key. По отдельному согласованию отключает сон на время демо и затем возвращает прежний режим. Не менять power policy автоматически.
+После reboot вручную убедиться в Tailscale login, адресах, firewall, start model и getHealth; auto-start задания добавлять только владельцем, без второго server.
+С чужого телефона: Telegram→QQCloud→реальная модель; затем веб one-time login в тот же аккаунт→та же история; изменения/прогресс туда-обратно; два пользователя изолированы. Restart сохраняет историю. Offline PC оставляет read path, generation завершается понятной ошибкой без retry/fixtures. Затем весь раздел7.

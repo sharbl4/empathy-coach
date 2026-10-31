@@ -1,3 +1,5 @@
+> Architecture update31.10.2026: web+Telegram now replaces Telegram-only. Draft telegram-1 policies below are NOT the text for the new web-telegram-2 consent. Public collection is blocked until operator review of web cookies/session/link flows and updated policy/consent. See ../contract-v2.md.
+
 # Правовой статус Telegram-only · 31.10.2026
 
 Оператор, подтверждённый Антоном: физическое лицо Неделько Антон, контакт antonnedelko@outlook.com. Полное ФИО/адрес для юридически значимых обращений и фактический username бота необходимо утвердить до публикации; приватные документы/секреты в чат не передавать.

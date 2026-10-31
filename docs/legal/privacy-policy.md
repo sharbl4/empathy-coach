@@ -1,3 +1,5 @@
+> HISTORICAL DRAFT telegram-1: transport/no-site assertions replaced by web+Telegram. Independent protection requirements remain draft guidance. Not an approved web-telegram-2 policy; do not publish as current consent.
+
 # Политика обработки данных «Между строк» · Telegram
 
 Проект редакции telegram-1 от 31.10.2026, не опубликован/не утверждён для публичной обработки. Предыдущая web/Supabase/GigaChat архитектура заменена решением Антона. Перед запуском заполнить реквизиты, получателей/страны, сроки и подтвердить фактические меры.

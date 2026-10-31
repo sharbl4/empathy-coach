@@ -1,3 +1,5 @@
+> HISTORICAL DRAFT telegram-1: transport/no-site assertions replaced by web+Telegram. Independent protection requirements remain draft guidance. Not an approved web-telegram-2 policy; do not publish as current consent.
+
 # Отдельное согласие · telegram-1
 
 Проект 31.10.2026. Не включать приём публичного согласия до заполнения реквизитов/получателей и утверждения редакции оператором. Не объединять с политикой/условиями в одну кнопку.

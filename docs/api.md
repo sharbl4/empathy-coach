@@ -1,11 +1,13 @@
-# In-process API · Telegram domain 1.0.0
+# API v2: shared facade + session HTTP
 
-Источник [точных сигнатур/DTO](../packages/contracts/src/domain.ts): @between/contracts/domain. [Семантика фасады](domain-contract.md). @between/api.createDomain импортируется без Fastify, bot вызывает методы напрямую. Старый bearer/HTTP не используется.
+Источники: [product.ts](../packages/contracts/src/product.ts), [http.ts](../packages/contracts/src/http.ts), [семантика](contract-v2.md). imports @between/contracts/product, /http, /product-fixtures (последний только test).
+Все27 функций раздела7 имеют common DTO/operations; webApi связывает каждую user operation с endpoint, bot вызывает typed UserMethods напрямую.
 
-Группы: account/consent/email; dialogue; create/read/update/list/delete sessions; analyze/read/retry runs; reply feedback/examples; exercise/feedback; roleplay start/turn/finish; sayDirect; progress; delete data/account; health/close. DTO strict Zod, Telegram BIGINT передаётся строкой, внутренние IDs UUID.
+Auth: GET /api/auth/session, GET /api/auth/entry, POST /api/auth/web-links/redeem, POST logout, GET/DELETE sessions. Только POST redeem body содержит краткоживущий link token; public response JSON никогда не содержит session token или private CookieMaterial; HTTP adapter только Set-Cookie. Origin+CSRF и stable UUID для mutation, серверная session проверяется до domain-issued context.
 
-DomainFailure содержит code/requestId, включая EMAIL_NOT_VERIFIED, CONSENT_REQUIRED, CODE_INVALID/CODE_EXPIRED, NOT_FOUND, REVISION_CONFLICT, IDEMPOTENCY_CONFLICT, RATE_LIMITED, DEPENDENCY_UNAVAILABLE. Transport отображает безопасные локальные сообщения, не сырой Error.
+Product paths: account/consent/email/dialogue/sessions/previews/runs/roleplays/examples/progress/practice/cards/reminders/assessments/events/support. Конкретные method/path/input/response закреплены webApi/authApi, не копировать DTO вручную.
+Path/query/body собираются без коллизий, строго валидируются; id ресурса не owner. Ответ перед send проверяется public response schema.
 
-Все записи требуют UUID key; ссылки — ownership/revision. SessionQuery: limit1..50, opaque cursor, поиск title, updatedAt DESC,id DESC. Чужие IDs → NOT_FOUND.
-
-[Старые HTTP JSON-примеры](archive/http-api-v0.1.md) сохранены и валидируются как регрессия форматов, а не публичный API. Новые схемы проверяются domain.test.ts; схемы не доказывают реализацию фасады.
+ProductError code/requestId и HttpErrorStatus включают401,403(CSRF/Origin/consent),409(revision/preview/idempotency/link/assessment due),410 expired,422 token/input budget,429,503. Сырые Error/SQL/SMTP/модельный output не отправлять.
+Pagination limit1..50/opaque cursor, same account/revision в двух интерфейсах. Unknown fields/role history/score/owner injection отвергаются.
+Старые HTTP examples в archive проверяются отдельно, не current API.

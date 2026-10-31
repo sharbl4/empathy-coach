@@ -5,6 +5,11 @@ node_modules
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/endpoint.key
+**/*-evidence*.json
 .tools
 test-results
 playwright-report

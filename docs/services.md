@@ -1,11 +1,8 @@
-# Актуальные сервисы
+# Доступы web + Telegram v2
 
-31.10.2026: только Telegram Bot API (transport), PostgreSQL, SMTP и приватный Windows llama.cpp. Supabase/GigaChat больше не runtime; [старые настройки](archive/web-services.md) — архив. Старый личный .env не перезаписывается, его секреты не печатаются и не передаются новому container env.
+Supabase/GigaChat больше не runtime, прежние инструкции заменены. Реальный .env не перезаписывается и не печатается. Поля актуального окружения — .env.example и RuntimeEnvironmentV2.
 
-Поля: NODE_ENV, DATABASE_URL, TELEGRAM_BOT_TOKEN, AI_PROVIDER=local, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, LOCAL_LLM_API_KEY, AI_TIMEOUT_MS, AI_MAX_CONCURRENCY, SMTP_HOST/PORT/USER/PASSWORD/FROM, EMAIL_CODE_SECRET. Точные имена/границы — RuntimeEnvironment в @between/contracts/domain. Production модель — numeric Tailscale IP /v1, не публичный inference endpoint.
-
-Отдельный test bot и disposable test DB обязательны. TEST_DATABASE_URL задаётся только в среде запуска тестов, не production runtime example. Telegram token создаёт/настраивает владелец через официальный @BotFather; webhook должен отсутствовать перед long polling, существующий webhook не удалять молча. getMe подтверждает реального бота, но не выдаёт права на чужие user IDs.
-
-SMTP подтверждает фактическую доставку пользователю; TCP/наличие пароля недостаточны. Код HMAC/TTL/attempt/resend/одноразовость реализует Дима; письмо не содержит переписки. Отказ SMTP не подтверждает адрес. Владелец задаёт пароли только локально/в hosting.
-
-services:check не делает генерацию и не запускает poller. model:check явно генерирует синтетические запросы и пишет только агрегаты; перед реальным запуском сообщить об этом. Запуск, сеть, recovery/backup/rollback — [runbook](runbook.md).
+Нужны: test Telegram bot (создаёт владелец), отдельная test DB; SMTP host/port/user/password/from и подтверждённый sender; code secret и два независимых session/link secrets; actual WEB_ORIGIN; модельный endpoint private IP/model alias/key; QQCloud SSH/persistent disk/Docker/DNS80/443. Секреты только локальный env/hosting.
+Supabase built-in mail теперь не используется. Для email verification нужен настоящий SMTP: проверить sender domain SPF/DKIM/DMARC, sandbox recipient restrictions, доставку/спам, TTL/cooldown/attempt cap; никакого кода в логах. До живого SMTP это непроверено.
+npm run services:check делает только PG SELECT1 и Telegram getMe после полной env validation. Polling/SMTP/inference этим НЕ подтверждаются. npm run model:check требует явного --allow-generation; запуск владельцу сообщается заранее.
+Браузер использует same-origin /api и cookie-session; bot token/DB/endpoint key/secrets никогда VITE. Dev Vite на5173 проксирует /api к3000. Production через HTTPS, exact origin, не wildcard CORS.

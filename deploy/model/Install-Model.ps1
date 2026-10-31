@@ -1,7 +1,9 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$ModelRoot)
+param([Parameter(Mandatory)][string]$ModelRoot,[ValidateSet('gemma','qwen')][string]$Profile='gemma',[switch]$GemmaTermsAccepted)
 $ErrorActionPreference='Stop'
 $lock=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'model-lock.json') | ConvertFrom-Json
+$lock.model=$lock.profiles.$Profile
+if($Profile -eq 'gemma' -and -not $GemmaTermsAccepted){throw 'Owner must read and accept https://ai.google.dev/gemma/terms before downloading; rerun with -GemmaTermsAccepted only after acceptance.'}
 $gpuTool=Get-Command nvidia-smi -ErrorAction SilentlyContinue
 if(-not $gpuTool){throw 'BLOCKED: run on the actual NVIDIA Windows PC; install its official driver first.'}
 $gpuInfo=& $gpuTool.Source --query-gpu=name,memory.total,memory.free,driver_version --format=csv,noheader
@@ -33,5 +35,5 @@ foreach($flag in @('--reasoning','--chat-template-kwargs','--api-key-file','--no
 $devices=(& $servers[0].FullName --list-devices 2>&1 | Out-String)
 if($LASTEXITCODE -ne 0 -or $devices -notmatch 'CUDA'){throw 'BLOCKED: checked binary did not report a CUDA device; CPU fallback is not accepted as GPU verification'}
 $evidence=@{tag=$lock.llama.tag;modelSha256=$lock.model.sha256;binarySha256=(Get-FileHash -LiteralPath $servers[0].FullName).Hash.ToLowerInvariant();helpChecked=$true;inferenceChecked=$false;gpu=$gpuInfo}
-$evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $resolvedRoot 'model-install-evidence.json') -Encoding utf8
+$evidence | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $resolvedRoot ("model-install-evidence-$Profile.json")) -Encoding utf8
 Write-Output 'OK checked files and executable help. Inference, thinking mode, VRAM headroom and quality still require measurement.'

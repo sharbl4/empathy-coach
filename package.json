@@ -5,24 +5,26 @@
   "workspaces": [
     "packages/contracts",
     "apps/api",
-    "apps/bot"
+    "apps/bot",
+    "apps/web"
   ],
   "engines": {
     "node": ">=24.22.1 <25"
   },
   "scripts": {
-    "dev": "node scripts/build-telegram.mjs && node scripts/launch-bot.mjs --dev",
-    "build": "node scripts/build-telegram.mjs",
+    "dev": "node scripts/dev-product.mjs",
+    "build": "node scripts/build-product.mjs",
     "lint": "eslint . --max-warnings 0",
-    "typecheck": "node scripts/build-telegram.mjs --typecheck",
-    "test:contracts": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts scripts/test/telegram-root.test.mjs",
+    "typecheck": "node scripts/build-product.mjs --typecheck",
+    "test:contracts": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts scripts/test/telegram-root.test.mjs scripts/test/application-lifecycle.test.mjs",
     "test": "npm run test:contracts && node scripts/test-domain.mjs",
     "test:legacy": "npm run build -w @between/contracts && tsx --test apps/api/test/*.test.ts scripts/test/readiness.test.mjs scripts/test/env-launcher.test.mjs",
     "db:migrate": "node scripts/migrate.mjs",
-    "services:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/telegram-services.mjs",
+    "services:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/product-services.mjs",
     "model:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/model-benchmark.mjs",
-    "e2e": "node scripts/check-telegram-live.mjs",
-    "start": "node scripts/launch-bot.mjs"
+    "e2e": "playwright test",
+    "start": "node scripts/launch-product.mjs",
+    "build:web": "npm run build -w @between/contracts && node scripts/build-web.mjs && node scripts/check-web-runtime.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

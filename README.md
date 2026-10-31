@@ -1,32 +1,32 @@
 # Между строк
 
-Telegram-тренажёр понимания чувств в переписке. Хакатон «Город героев», тема «Чувствовать».
+Хакатон «Город героев», тема «Чувствовать». Целевой продукт: веб и Telegram — с одним аккаунтом, историей и доменом.
 
-Решение Антона 31.10.2026 заменяет web/Supabase/GigaChat runtime: только личные Telegram-чаты. QQCloud 1 CPU/2 ГБ: один Node-процесс bot+domain и PostgreSQL. Модель на другом домашнем Windows-ПК через закрытую сеть. Нет сайта, Mini App и внешнего inference API.
+Решение Антона31.10.2026 заменяет Telegram-only/архив apps/web. Supabase Auth, GigaChat и hosted inference не возвращаются. QQCloud1CPU/2ГБ: PostgreSQL и один app-процесс Fastify+polling+workers. Fastify обслуживает web/dist и /api с одного origin; bot вызывает фасаду напрямую. Windows GPU-PC через private network выполняет локальную модель.
 
-Node 24.22.1 LTS, npm workspaces, TS, Zod и pg сохранены. packages/contracts/domain — общая фасада; apps/api — библиотека, apps/bot — transport. apps/web и старые HTTP-адаптеры архивные. Миграции/данные сохраняются.
+## Старт и контракт
 
-Первый contract commit: 860cd33de38af8baa25fb770e7757d9421ca85d1. [Дима #15](https://github.com/sharbl4/empathy-coach/issues/15) реализует фасаду/миграции; [Даня #16](https://github.com/sharbl4/empathy-coach/issues/16) — bot. Отправленная задача не означает принятия контракта. Пока createDomain/entry отсутствуют, integration build должен блокироваться явно.
-
-## Команды
+Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 —31574f8 (первый отдельный draft —88b83d3), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
+Полный обязательный [продукт](docs/product.md), [архитектура](docs/architecture.md), [приёмка](docs/acceptance.md).
+Код старого веба сохранён, но его Supabase-auth должен заменить Даня; до этого release guard не выдаёт его за рабочую новую авторизацию. Реальных domain/http/bot модулей пока нет; integration CI блокируется, а не исключается.
 
 ```sh
 npm ci
 npm run test:contracts
-npm run lint
+npm run build:web
 npm run typecheck
 npm run build
-# Fill current .env locally; separate test bot/database mandatory.
 docker compose up -d db
 npm run db:migrate
 npm run dev
 npm start
+npm run e2e
 ```
 
-Contracts всегда первым; release build только contracts/api/bot. dev/start не запускают Vite/Fastify. Старый личный .env автоматически не перезаписывается. Секреты заполнить локально по актуальному .env.example.
+Node24.22.1 LTS, npm workspaces TS/React/Vite/Fastify/Zod/pg. Contracts первыми. Production web build принудительно NODE_ENV=production, без fixture/bypass/legacy Auth. Browser public env только VITE_PUBLIC_*; API same-origin /api. Секреты не VITE и не в клиенте.
 
-services:check проверяет PG/getMe/webhook без polling/генерации. model:check -- --requests 10 выполняет явные синтетические генерации; это не E2E. test:legacy сохраняет прежние HTTP/model adapter тесты, не подтверждает новый runtime.
+Существующий .env и IDE не перезаписываются. Новые параметры заполняет владелец локально/hosting по .env.example; dev/test/prod разделены, test bot/DB отдельные. Веб входит по одноразовой ссылке из своего бота с явным POST-подтверждением, пароли не нужны; cookies HttpOnly/Secure/SameSite, Origin+CSRF и одноразовая browser binding.
 
-На доступном ПК только Intel Graphics, nvidia-smi/Tailscale не найдены. RTX находится на другом ПК владельца; модель/VRAM/QQCloud/закрытая сеть здесь не проверены.
+На этом рабочем ПК Intel Graphics/около16ГБ; RTX3070Ti/32ГБ — другой ПК владельца. Нет GPU/QQCloud/Tailscale access; N реальных новых inference0. Gemma3 4B Q4_K_M и Qwen3-4B-Instruct-2507 сравниваются после принятия владельцем условий и фактических замеров, не выбираются по обещанию5с.
 
-[Runbook](docs/runbook.md), [архитектура](docs/architecture.md), [фасада](docs/domain-contract.md), [приёмка](docs/acceptance.md), [модель](docs/local-model.md), [демо](docs/demo.md). [Правовые документы](docs/legal/README.md) требуют обновления/утверждения под новые потоки; private network не доказывает выполнение 152-ФЗ.
+[Runbook](docs/runbook.md), [модель](docs/local-model.md), [локальная передача/оценка](docs/handoff-v2.md), [демо](docs/demo.md). Старые plans/legacy tests сохранены, но не описывают новый runtime.

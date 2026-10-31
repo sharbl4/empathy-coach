@@ -1,6 +1,7 @@
-Read AGENTS.md, hackathon-prompts.md, README.md and docs/{product,architecture,api,acceptance}.md.
-Anton approved Telegram-only 2026-10-31; earlier browser/Supabase/GigaChat instructions are superseded. apps/web is archive.
-Danya owns apps/bot/src and scenario/transport tests, entry src/main.ts. Call @between/api.createDomain directly using @between/contracts/domain; no HTTP/bearer shim or DTO copies.
-Private updates only. Owner is trusted update sender, not callback/username/text. Persist dialogue/intents via agreed domain boundary. No private text or secrets in logs/callback payload.
-One poller, graceful stop, safe plain-text rendering, stable idempotency and clear local-model outage. No fixture/external inference fallback.
-Coordinate root/contracts/deps/lockfile/facade changes with Anton/Dima. Preserve existing migrations and other people's work. Report real checks and remaining gates.
+Read AGENTS.md, README.md, hackathon-prompts.md, docs/{product,architecture,api,acceptance}.md and available team-tasks-web-telegram.md.
+Anton approved web+Telegram; Telegram-only/apps-web-archive instructions are superseded. Full section7 is current scope.
+Danya owns apps/web+apps/bot. Dima owns domain/auth/HTTP. Anton owns contracts/root/dependencies/lock/CI/deploy/model.
+Use @between/contracts/product and /http DTOs, not copied BotDomain/client contracts. Bot invokes shared facade; web uses cookie session API, no Supabase/bot/model secrets.
+Identity from trusted private sender or verified server cookie only; UserContext issuer and account checked by domain. Preview confirmation precedes every generation. Model text is plain data, no execution.
+Persist stable intents/inbox/outbox, handle revisions, partial startup and shutdown. No live error fallback to fixtures; explicit test adapters reject production.
+No external issues/team messages without authorization. Preserve uncommitted plans, env, IDE and applied migrations. Report actual checks and remaining live gates.

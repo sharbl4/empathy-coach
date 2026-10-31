@@ -1,4 +1,4 @@
-name: Telegram CI
+name: Web and Telegram CI
 on: [push, pull_request]
 permissions:
   contents: read
@@ -23,7 +23,19 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$parseTokens,[ref]$parseErrors) | Out-Null
             if($parseErrors.Count){throw "PowerShell syntax errors in $($_.Name)"}
           }
-  domain-bot-integration:
+  web-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @between/contracts
+      - run: npm run typecheck -w @between/web
+      - run: npm run build:web
+  domain-bot-web-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -59,8 +71,14 @@ jobs:
           DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
       - name: Required new facade DB tests and transport tests, never legacy substitutes
         run: npm test
-      - run: docker build -t between-telegram:${{ github.sha }} .
+      - name: Preserved legacy SQL/domain regressions (not new live acceptance)
+        run: npm run test:legacy
+      - name: Mandatory browser linked login and common history with isolated test adapters
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
+      - run: docker build -t between-product:${{ github.sha }} .
       - name: Production dependency closure and import without user-facing server
         run: |
-          timeout 10s docker run --rm between-telegram:${{ github.sha }} node --input-type=module -e "const m=await import('@between/api');if(typeof m.createDomain!=='function')process.exit(1)"
+          timeout 10s docker run --rm --network none between-product:${{ github.sha }} node --input-type=module -e "const d=await import('@between/api'),h=await import('@between/api/http'),t=await import('@between/bot');if(typeof d.createDomain!=='function'||typeof h.createHttpAdapter!=='function'||typeof t.createTelegramTransport!=='function')process.exit(1)"
 # Real test-bot/QQCloud/home-GPU/SMTP/network/load/phone gates remain separate.

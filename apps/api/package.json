@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "default": "./dist/http/index.js"
     }
   },
   "scripts": {
@@ -15,12 +19,12 @@
   },
   "dependencies": {
     "@between/contracts": "0.1.0",
-    "pg": "8.16.3"
+    "pg": "8.16.3",
+    "fastify": "5.12.7",
+    "@fastify/static": "10.1.8"
   },
   "devDependencies": {
     "@types/pg": "8.15.5",
-    "fastify": "5.12.7",
-    "@fastify/static": "10.1.8",
     "@supabase/supabase-js": "2.76.1"
   }
 }

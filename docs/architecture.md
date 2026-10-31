@@ -1,26 +1,22 @@
-# Архитектура Telegram-only
+# Архитектура web + Telegram v2
 
-Решение Антона 31.10.2026 заменяет React/Fastify HTTP/Supabase/GigaChat. [Архив](archive/web-architecture.md) не инструкция запуска.
+Решение Антона31.10.2026 заменяет Telegram-only. apps/web рабочий, auth/HTTP — Дима, web+bot — Даня; root/contracts/CI/model/deploy — Антон.
 
 ```text
-Telegram getUpdates (TLS, private chats)
-  → apps/bot transport/scenarios, один Node-процесс QQCloud
-    → @between/api.createDomain (in-process)
-      → PostgreSQL accounts/dialogue/sessions/runs/learning
-      → Tailscale → Windows llama.cpp /v1/chat/completions
-    → SMTP для подтверждения email
+Browser HTTPS → reverse proxy → Fastify /api + web/dist
+Telegram private updates → polling ─┐
+                                  ├→ один ProductFacade → PostgreSQL
+HTTP verified session → UserContext┘                 └→ private network → Windows llama.cpp
 ```
 
-Нет Redis/сервиса очередей/публичного HTTP backend. apps/api — библиотека, импорт не запускает сервер. Production содержит только bot/domain/миграции; web/Fastify/Supabase/hosted inference исключены из runtime graph.
+Один app Node-процесс с HTTP/polling/workers/scheduler; отдельный PG, допустим HTTPS proxy. Нет Supabase/GigaChat/hosted inference. Домен не импортирует transport, factory/import не запускает workers/HTTP. Root scripts/application.mjs явно связывает side-effect-free @between/api.createDomain, @between/api/http.createHttpAdapter, @between/bot.createTelegramTransport.
 
-Principal — доверенный Telegram sender, не callback data/username. Domain-issued UserContext связывает telegram_user_id BIGINT с внутренним UUID; DTO ID — decimal string. TS brand не защита: проверяются issuer/выданный объект и актуальная запись аккаунта/consent/email. Каждый session/run/roleplay ID ограничен владельцем/revision.
+Identity: Telegram private sender либо opaque server web session; domain-issued UserContext с runtime issuer/account checks. Никакого body ownerId, username/email merge или localStorage authority. Один аккаунт/UUID и одна история в обеих UI. Новые миграции только вперёд, существующие данные не переписываются.
 
-Дима добавляет новые миграции accounts/challenges/consents/dialogue/update intents. Старые profiles/sessions/ai_runs/roleplays/messages/practice_events, применённые миграции и данные сохраняются. Старые UUID нельзя автоматически связать по email/имени.
+Auth/preview/idempotency/inbox/outbox: [контракт v2](contract-v2.md). До подтверждения полного очищенного snapshot/hash/revision/model/prompt ни одной генерации. Лимит4k включает template/system/input/output/reserve, разные output caps для задач. Model offline не мешает истории/аккаунту/карточкам. Queue bounded, concurrency1, неопределённый run не повторяется автоматически.
 
-Сигнатуры: [domain-contract.md](domain-contract.md). Записи идемпотентны по owner+operation+resource+UUID и canonical validated payload, конкурентность обеспечивается SQL. Повтор update/неопределённый исход сохраняет intent, не создаёт второй run. У dialogue своя revision; transport не передаёт готовые анализы/историю модели.
+Один poller actual botId с DB lease; HTTP не вызывает Telegram handler через fake bearer. Delivery/scheduler opt-in и durable; DST/quiet hours/local dates не зависят от TZ сервера. Сессии/cookies/preview/assessment имеют ownership и атомарные проверки.
 
-Один poller на фактический botId: DB advisory lease до getUpdates, при потере lease polling прекращается. Runs тоже удерживает lease; начальная цель pool max=5 учитывает обе связи и требует замера. AI concurrency=1. Генерация вне SQL-транзакции. Interrupted pending → RUN_INTERRUPTED, нет автоматического retry.
+Shutdown/partial start: stop accepting, остановить polling/HTTP, abort/drain workers/model requests с лимитом, finally закрыть delivery/scheduler/leases/pool. Health учитывает HTTP/polling/workers/scheduler/DB, не требует доступной модели для чтения истории. Никаких raw URLs/cookies/payload в логах.
 
-Только AI_PROVIDER=local, private LOCAL_LLM_BASE_URL. Ограничены timeout/input/output/context; большой input отклоняется, не обрезается молча. Strict schema/evidence validation; reasoning/незавершённый output не становятся succeeded и не показываются. Удалённые данные/старая revision не восстанавливаются поздним output.
-
-QQCloud: bot512MiB + DB512MiB, CPU0.65/0.25 и запас ОС при 2GiB — начальная гипотеза, не замер. Модель на VM не запускается; image собирается в CI/на ПК. Windows слушает только Tailscale IP:8080. ACL cloud tag→model tag tcp8080, firewall — конкретный cloud IP/порт/программа. API key дополнительно, не вместо сети. Роутер/firewall не отключать; direct/relay измерять фактически.
+QQCloud1CPU/2ГБ требует проверки постоянного процесса/диска/HTTPS; Telegram domain bot этого не доказывает. Начальные caps app640MiB, db512MiB, proxy64MiB оставляют~832MiB ОС, pool target5; не замер. Image собирается на ПК/CI, не VM. PG/model порты не опубликованы, proxy trust exact IP only. Модель слушает private IP, ACL+Windows firewall разрешают только cloud node.

@@ -20,8 +20,8 @@ export class ProductRuns {
   healthy(){return !!this.lease&&!this.stopping;}
   cancel(user:string){for(const e of this.executing.values())if(e.user===user)e.controller.abort();}
   async close(){this.stopping=true;if(this.timer)clearInterval(this.timer);for(const e of this.executing.values())e.controller.abort();await Promise.allSettled([...this.executing.values()].map(e=>e.done));if(this.lease){await this.lease.query('SELECT pg_advisory_unlock(748311913)').catch(()=>{});this.lease.release();this.lease=undefined;}}
-  submit(ctx:UserContext,input:OperationInput<'startRun'>,key:string){return this.store.write(ctx,'startRun',input,key,async(c,row,r)=>({value:await this.admit(c,row,r)}),true);}
-  retry(ctx:UserContext,input:OperationInput<'retry'>,key:string){return this.store.write(ctx,'retry',input,key,async(c,row,r)=>{
+  async submit(ctx:UserContext,input:OperationInput<'startRun'>,key:string){await this.previews.sessions.dialogues.ensure(ctx);return this.store.write(ctx,'startRun',input,key,async(c,row,r)=>({value:await this.admit(c,row,r)}),true);}
+  async retry(ctx:UserContext,input:OperationInput<'retry'>,key:string){await this.previews.sessions.dialogues.ensure(ctx);return this.store.write(ctx,'retry',input,key,async(c,row,r)=>{
     const old=(await c.query('SELECT * FROM app.product_runs WHERE id=$1 AND user_id=$2',[r.id,row.id])).rows[0];if(!old)fail('NOT_FOUND');const prior=RunV2.parse(old.value);if(prior.status!=='failed')fail('OPERATION_IN_PROGRESS');if(prior.revision!==r.expectedRevision)fail('REVISION_CONFLICT');
     const p=(await this.previews.owned(c,row.id,r.previewId)).value;if(p.kind!==prior.kind||p.sessionId!==prior.sessionId||p.snapshotHash!==r.snapshotHash)fail('PREVIEW_STALE');
     // Role retries reuse the durable failed operation, never append another user turn.
@@ -46,7 +46,8 @@ export class ProductRuns {
       await c.query('UPDATE app.product_roles SET value=$3,last_run_id=$4 WHERE id=$1 AND user_id=$2',[role.id,row.id,RoleplayV2.parse(next),id]);
     }
     const at=new Date(this.store.now()).toISOString(),run=RunV2.parse({id,sessionId:p.sessionId,revision:p.sessionRevision??1,previewId:p.id,previewRevision:p.revision,modelRevision:p.modelRevision,promptVersion:p.promptVersion,kind:p.kind,status:'pending',phase:'queued',queuePosition:null,output:null,errorCode:null,createdAt:at,updatedAt:at});
-    await c.query('INSERT INTO app.product_runs(id,user_id,session_id,preview_id,value,snapshot,roleplay_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,row.id,p.sessionId,p.id,run,p,resourceId??null,new Date(this.store.now())]);return {runId:id,...resourceId?{resourceId}:{}};
+    await c.query('INSERT INTO app.product_runs(id,user_id,session_id,preview_id,value,snapshot,roleplay_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,row.id,p.sessionId,p.id,run,p,resourceId??null,new Date(this.store.now())]);
+    const dialogues=this.previews.sessions.dialogues,state=await dialogues.read(c,row);await dialogues.save(c,row.id,dialogues.next(state,{step:'waiting_run',navigation:{kind:'none'},draft:{},sessionId:p.sessionId,previewId:p.id,roleplayId:resourceId??null,pendingRunId:id}));return {runId:id,...resourceId?{resourceId}:{}};
   }
   async get(c:PoolClient,user:string,id:string){const db=(await c.query('SELECT * FROM app.product_runs WHERE id=$1 AND user_id=$2',[id,user])).rows[0];if(!db)fail('NOT_FOUND');let run=RunV2.parse(db.value);if(run.status==='pending'&&run.phase==='queued'){const position=(await c.query("SELECT count(*)::int n FROM app.product_runs WHERE value->>'phase'='queued' AND (created_at,id)<($1,$2)",[db.created_at,id])).rows[0].n;run={...run,queuePosition:position};}return run;}
   private async pump(){
@@ -85,6 +86,7 @@ export class ProductRuns {
       await c.query('UPDATE app.product_runs SET value=$3 WHERE id=$1 AND user_id=$2',[db.id,row.id,value]);
       if(!errorCode)await this.completed(c,row,value);
       await c.query('INSERT INTO app.product_deliveries(id,user_id,run_id,next_attempt_at,created_at) VALUES($1,$2,$3,$4,$4) ON CONFLICT DO NOTHING',[randomUUID(),row.id,db.id,new Date(this.store.now())]);
+      const dialogues=this.previews.sessions.dialogues,state=await dialogues.read(c,row);if(state.step==='waiting_run'&&state.pendingRunId===db.id)await dialogues.save(c,row.id,dialogues.next(state,{step:'menu',navigation:{kind:'none'},pendingRunId:null}));
     });
   }
 }

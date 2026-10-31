@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,dirname,resolve,basename} from 'node:path';
 import {createHttpAdapter} from '../src/http/index.js';
 import {ProductError,PublicWebSession,type ProductFacade} from '@between/contracts/product';
 import {productHarness,syntheticInput,uid} from './product-harness.js';
@@ -25,7 +25,7 @@ test('A1 real HTTP cookie exchange, CSRF, races/replay, owner isolation, collisi
     const held=await h.domain.resolveWebSession(jars.get('one')!.get('between_session_dev')!);const logout=await request('one','/api/auth/logout','POST',{},await proof('one'));assert.equal(logout.status,200);await assert.rejects(h.domain.account(held,{}),e=>typeof e==='object'&&e!==null&&'code'in e&&e.code==='UNAUTHORIZED');assert.equal((await session('one')).authenticated,false);
     // Browser test adapter is a separate opt-in helper, absent from production HTTP.
     assert.equal((await request('anon','/__test/issue-web-link','POST',{account:'A'})).status,404);
-  }finally{await http?.close();await h.close();await rm(webRoot,{recursive:true,force:true});}
+  }finally{await http?.close();await h.close();assert.equal(resolve(dirname(webRoot)),resolve(tmpdir()));assert.ok(basename(webRoot).startsWith('between-web-test-'));await rm(webRoot,{recursive:true,force:true});}
 });
 test('A1 revoked/expired sessions never revive through exchange replay; CSRF also protects anonymous exchange',async()=>{
   const h=await productHarness();try{const {ctx}=await h.verified(),link=await h.domain.issueWebLink(ctx,uid()),token=new URL(link.webUrl).hash.slice(7),b=await h.domain.openBrowser(),intent=uid();await assert.rejects(h.domain.redeemWebLink(b.context,{token,confirmed:true},intent),e=>typeof e==='object'&&e!==null&&'code'in e&&e.code==='CSRF_FAILED');

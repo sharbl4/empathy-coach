@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {modelOutputsV2,MODEL_PROMPT_VERSION,OutputTokenLimits,validateEvidenceV2,type Preview,type ProductOptions} from '@between/contracts/product';
-import {isPrivateModelUrl} from '@between/contracts/domain';
+import {isPrivateModelUrl} from '@between/contracts/runtime';
 import {canonical} from './core.js';
 export type Snapshot=ReturnType<typeof Preview.parse>;
 export interface TemplateInfo {hash:string;contextWindow:number;templateTokens:number;systemTokens:number;known:boolean;}

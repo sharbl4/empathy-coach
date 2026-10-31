@@ -37,7 +37,9 @@ export class Store {
     const answer=await transaction(this.pool,async c=>{
       const row=await this.contexts.check(ctx,c,learning,true),hash=hmac(this.secret,op,input);
       const prior=(await c.query("SELECT * FROM app.domain_intents WHERE user_id=$1 AND operation=$2 AND resource='' AND intent_key=$3",[row.id,'v2.'+op,key])).rows[0];
-      if(prior){if(prior.payload_hmac!==hash)fail('IDEMPOTENCY_CONFLICT');if(prior.state==='processing')fail('OPERATION_IN_PROGRESS');return {value:prior.result as OperationOutput<K>,error:prior.error_code as Code|undefined};}
+      if(prior){if(prior.payload_hmac!==hash)fail('IDEMPOTENCY_CONFLICT');if(prior.state==='processing')fail('OPERATION_IN_PROGRESS');
+        if((op==='updateDialogue'||op==='resetDialogue')&&!prior.error_code){const current=(await c.query('SELECT value,expires_at FROM app.product_dialogues WHERE user_id=$1',[row.id])).rows[0];if(!current||current.expires_at.getTime()<=this.now()||current.value.revision!==prior.result?.revision)fail('REVISION_CONFLICT');}
+        return {value:prior.result as OperationOutput<K>,error:prior.error_code as Code|undefined};}
       const result=await work(c,row,input);after=result.after;
       await c.query("INSERT INTO app.domain_intents(user_id,operation,resource,intent_key,payload_hmac,result,error_code,state) VALUES($1,$2,'',$3,$4,$5,$6,$7)",[row.id,'v2.'+op,key,hash,JSON.stringify(result.value),result.error??null,result.error?'failed':'completed']);return result;
     });after?.();if(answer.error)fail(answer.error);return operations[op].response.parse(answer.value) as OperationOutput<K>;

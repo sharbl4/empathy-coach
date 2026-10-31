@@ -1,11 +1,13 @@
 import {randomUUID} from 'node:crypto';
-import {SessionV2,DialogueV2,RunV2,RoleplayV2,type OperationInput,type UserContext} from '@between/contracts/product';
+import {SessionV2,RunV2,RoleplayV2,type OperationInput,type UserContext} from '@between/contracts/product';
 import type {PoolClient} from 'pg';
 import {maskAll} from './redaction.js';
+import {Dialogues} from './dialogue.js';
 import {Store,fail,paginate,cursorCodec,type AccountRow} from './core.js';
 export const sessionDto=(row:{id:string;input:unknown;revision:number;created_at:Date;updated_at:Date})=>SessionV2.parse({id:row.id,input:row.input,revision:row.revision,createdAt:row.created_at.toISOString(),updatedAt:row.updated_at.toISOString()});
 export class Sessions {
-  constructor(readonly store:Store){}
+  readonly dialogues:Dialogues;
+  constructor(readonly store:Store){this.dialogues=new Dialogues(store,async(c,user,input)=>{if(input.sessionId)await this.owned(c,user,input.sessionId);if(input.roleplayId){const role=await this.role(c,user,input.roleplayId);if(role.row.session_id!==input.sessionId)fail('VALIDATION_ERROR');}if(input.previewId){const p=(await c.query('SELECT session_id FROM app.product_previews WHERE id=$1 AND user_id=$2',[input.previewId,user])).rows[0];if(!p)fail('NOT_FOUND');if(p.session_id!==input.sessionId)fail('VALIDATION_ERROR');}});}
   async owned(c:PoolClient,user:string,id:string,expected?:number){const row=(await c.query('SELECT * FROM app.product_sessions WHERE id=$1 AND user_id=$2 FOR UPDATE',[id,user])).rows[0];if(!row)fail('NOT_FOUND');if(expected!==undefined&&row.revision!==expected)fail('REVISION_CONFLICT');return sessionDto(row);}
   async role(c:PoolClient,user:string,id:string,expected?:number){const row=(await c.query('SELECT * FROM app.product_roles WHERE id=$1 AND user_id=$2 FOR UPDATE',[id,user])).rows[0];if(!row)fail('NOT_FOUND');const value=RoleplayV2.parse(row.value);if(expected!==undefined&&value.revision!==expected)fail('REVISION_CONFLICT');await this.owned(c,user,row.session_id,row.session_revision);return {row,value};}
   create(ctx:UserContext,input:OperationInput<'createSession'>,key:string){return this.store.write(ctx,'createSession',input,key,async(c,row,original)=>{const value=maskAll(original),id=randomUUID(),now=new Date(this.store.now());const result=(await c.query('INSERT INTO app.product_sessions(id,user_id,input,created_at,updated_at) VALUES($1,$2,$3,$4,$4) RETURNING *',[id,row.id,value,now])).rows[0];return {value:sessionDto(result)};},true);}
@@ -18,13 +20,6 @@ export class Sessions {
   async rolePage(c:PoolClient,row:AccountRow,input:OperationInput<'roleplays'>){await this.owned(c,row.id,input.sessionId);const codec=cursorCodec(this.store.secret,[row.id,'roles',input.sessionId]),cursor=codec.decode(input.cursor);if(cursor!==null&&typeof cursor!=='string')fail('VALIDATION_ERROR');const rows=(await c.query('SELECT value FROM app.product_roles WHERE user_id=$1 AND session_id=$2 AND ($3::uuid IS NULL OR id<$3) ORDER BY id DESC LIMIT $4',[row.id,input.sessionId,cursor,input.limit+1])).rows.map(r=>RoleplayV2.parse(r.value));return paginate(rows,input.limit,r=>codec.encode(r.id));}
   detail(ctx:UserContext,input:OperationInput<'session'>){return this.store.read(ctx,true,async(c,row)=>({...await this.owned(c,row.id,input.id),runs:await this.runPage(c,row,{sessionId:input.id,limit:20}),roleplays:await this.rolePage(c,row,{sessionId:input.id,limit:20})}));}
   async tombstone(c:PoolClient,user:string,id?:string){await c.query("UPDATE app.domain_intents SET result=NULL,state='failed',error_code='NOT_FOUND' WHERE user_id=$1 AND operation LIKE 'v2.%' AND (operation IN ('v2.createSession','v2.updateSession','v2.createPreview','v2.editPreview','v2.confirmPreview','v2.startRun','v2.retry','v2.updateDialogue') OR operation LIKE 'v2.complete%') AND ($2::text IS NULL OR result->>'id'=$2 OR result->>'sessionId'=$2 OR result->>'runId' IN (SELECT id::text FROM app.product_runs WHERE session_id=$2::uuid AND user_id=$1))",[user,id??null]);}
-  async dialogue(c:PoolClient,row:AccountRow){const r=(await c.query('SELECT * FROM app.product_dialogues WHERE user_id=$1',[row.id])).rows[0];if(r&&r.expires_at.getTime()>this.store.now())return DialogueV2.parse(r.value);const value=DialogueV2.parse({revision:r?r.value.revision+1:1,step:row.consent_version?'menu':'onboarding',draft:{},sessionId:null,previewId:null,roleplayId:null,pendingRunId:null});await c.query('INSERT INTO app.product_dialogues(user_id,value,expires_at) VALUES($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET value=$2,expires_at=$3',[row.id,value,new Date(this.store.now()+3600000)]);return value;}
-  patchDialogue(ctx:UserContext,input:OperationInput<'updateDialogue'>,key:string){return this.store.write(ctx,'updateDialogue',input,key,async(c,row,v)=>{
-    const prior=await this.dialogue(c,row);if(prior.revision!==v.expectedRevision)fail('REVISION_CONFLICT');if(!['onboarding','email','email_code','menu'].includes(v.step)){if(row.consent_version!=='web-telegram-2')fail('CONSENT_REQUIRED');if(!row.email_verified_at)fail('EMAIL_NOT_VERIFIED');}
-    if(v.sessionId)await this.owned(c,row.id,v.sessionId);if(v.roleplayId){const r=await this.role(c,row.id,v.roleplayId);if(r.row.session_id!==v.sessionId)fail('VALIDATION_ERROR');}
-    if(v.previewId){const p=(await c.query('SELECT session_id FROM app.product_previews WHERE id=$1 AND user_id=$2',[v.previewId,row.id])).rows[0];if(!p)fail('NOT_FOUND');if(p.session_id!==v.sessionId)fail('VALIDATION_ERROR');}
-    const value=DialogueV2.parse({revision:prior.revision+1,step:v.step,draft:maskAll(v.draft),sessionId:v.sessionId,previewId:v.previewId,roleplayId:v.roleplayId,pendingRunId:null});
-    // Strict DTO reconstruction excludes request-only expectedRevision.
-    await c.query('UPDATE app.product_dialogues SET value=$2,expires_at=$3 WHERE user_id=$1',[row.id,value,new Date(this.store.now()+3600000)]);return {value};
-  });}
+  dialogue(c:PoolClient,row:AccountRow){return this.dialogues.read(c,row);}
+  patchDialogue(ctx:UserContext,input:OperationInput<'updateDialogue'>,key:string){return this.dialogues.patch(ctx,input,key);}
 }

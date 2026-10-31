@@ -1,4 +1,4 @@
-# Generated facade 2.2.0
+# Generated facade 2.2.1
 
 Source: packages/contracts/src/product.ts and http.ts. Regenerate: npm run build -w @between/contracts; node scripts/generate-product-contract.mjs. Semantic rules: contract-v2.2.md; earlier v2/A1 docs are historical where superseded. This is the complete mandatory scope, not a claim of implementation.
 

@@ -32,7 +32,7 @@ export const buildHttpAdapter=async(options:Parameters<CreateHttpAdapter>[0],tes
     }
     if(binding.clearSessionCookie===true)setCookie(reply,policy.sessionName,'',true);const output=route.response.safeParse(result);if(!output.success)fail('INTERNAL_ERROR');return reply.send(output.data);
   }});
-  app.get('/health/live',async()=>({status:'ok'}));app.get('/health/ready',async(_request,reply)=>{const h=await options.domain.health(),ready=listening&&h.database&&h.workers&&h.scheduler&&h.pollerLease;return reply.code(ready?200:503).send({status:ready?'ready':'unavailable'});});
+  app.get('/api/health/live',async()=>({status:'ok'}));app.get('/api/health/ready',async(_request,reply)=>{const h=await options.domain.health(),ready=listening&&h.database&&h.workers&&h.scheduler&&h.pollerLease;return reply.code(ready?200:503).send({status:ready?'ready':'unavailable'});});
   if(testIssue)app.post('/__test/issue-web-link',async(request)=>{const body=request.body;if(!body||typeof body!=='object'||Object.keys(body).length!==1||!('account' in body)||!['A','B'].includes(String(body.account)))fail('VALIDATION_ERROR');return testIssue(body.account as 'A'|'B');});
   await app.register(staticFiles,{root:resolve(options.webRoot),index:false});app.setNotFoundHandler(async(request,reply)=>{if(request.url.startsWith('/api/')||!['GET','HEAD'].includes(request.method))return reply.code(404).send(ProductError.parse({error:{code:'NOT_FOUND',requestId:request.id}}));return reply.sendFile('index.html');});
   return {listen:()=>listenPromise??(listenPromise=(async()=>{await app.listen({host:options.host,port:options.port});listening=true;})()),close:()=>closePromise??(closePromise=(async()=>{listening=false;await app.close();})()),health:()=>({listening})};

@@ -2,7 +2,7 @@
 import {z} from 'zod';
 import {Id,Goal,Revision} from './index.js';
 import {Account,AccountPatch,EmailRequest,EmailVerification,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,UpdateCursor,DeliveryFailure,type UserContext} from './domain.js';
-export const PRODUCT_CONTRACT_VERSION='2.2.0';
+export const PRODUCT_CONTRACT_VERSION='2.2.1';
 const text=(max=3000)=>z.string().trim().min(1).max(max);
 const date=z.iso.date(),instant=z.iso.datetime();
 export const Empty=z.strictObject({});
@@ -59,13 +59,14 @@ function validNavigation(value:{step:string;draft:z.infer<typeof ComposerDraft>;
   if(nav.kind==='preview_field'||nav.kind==='preview')return value.step==='preview'&&value.previewId===nav.previewId;
   if(nav.kind==='thread_turn')return value.step==='compose'&&value.draft.mode==='thread'&&(nav.turnId===null||!!value.draft.turns?.some(turn=>turn.id===nav.turnId));
   if(nav.kind==='card')return value.step==='card';
-  if(nav.kind==='assessment')return value.step==='assessment';
+  if(nav.kind==='assessment')return value.step==='assessment'||value.step==='menu';
   if(nav.kind==='reminder_field')return value.step==='settings';
   if(nav.kind==='support_region')return value.step==='support';
   return !['assessment','preview'].includes(value.step);
 }
 export const DialogueV2=z.strictObject({revision:Revision,...dialogueState,pendingRunId:Id.nullable(),createdAt:instant,expiresAt:instant}).refine(validNavigation).refine(value=>{const lifetime=Date.parse(value.expiresAt)-Date.parse(value.createdAt);return lifetime>0&&lifetime<=DIALOGUE_MAX_LIFETIME_SECONDS*1000;});
 export const DialoguePatch=z.strictObject({expectedRevision:Revision,...dialogueState}).refine(validNavigation);
+export const ResetDialogue=z.strictObject({expectedRevision:Revision,confirmation:z.literal('DISCARD_UNFINISHED_ASSESSMENT').optional()});
 export const UpdateSessionV2=z.strictObject({id:Id,expectedRevision:Revision,input:SessionInputV2});
 export const PreviewKind=z.enum(['analysis','say_direct','before_send','reply_feedback','reply_examples','clarify','exercise','exercise_feedback','roleplay_start','roleplay_turn','roleplay_feedback','card_feedback']);
 export const PreviewSource=z.discriminatedUnion('kind',[
@@ -107,7 +108,9 @@ export const RoleMessage=z.strictObject({kind:z.literal('message'),content:text(
 export const modelOutputsV2={analysis:AnalysisV2,say_direct:DirectV2,before_send:DraftFeedback,reply_feedback:DraftFeedback,reply_examples:FourGoals,clarify:z.strictObject({questions:z.array(text(500)).min(1).max(3),explanation:text(1000)}),exercise:z.strictObject({instruction:text(),skill:Skill,exampleHint:text(500)}),exercise_feedback:Feedback,roleplay_start:RoleMessage,roleplay_turn:z.discriminatedUnion('kind',[RoleMessage,RoleFeedback]),roleplay_feedback:RoleFeedback,card_feedback:Feedback} as const;
 export const MODEL_PROMPT_VERSION='between-product-v2';
 export const OutputTokenLimits={analysis:1400,say_direct:700,before_send:1400,reply_feedback:1400,reply_examples:1000,clarify:350,exercise:500,exercise_feedback:700,roleplay_start:350,roleplay_turn:700,roleplay_feedback:700,card_feedback:700} as const;
-const runBase={id:Id,sessionId:Id.nullable(),revision:Revision,previewId:Id,previewRevision:Revision,modelRevision:text(200),promptVersion:text(100),createdAt:instant,updatedAt:instant};
+export const VoteValue=z.enum(['useful','not_useful']);
+// Optional on the wire for 2.2 compatibility; updated servers emit null/value on every owned run read.
+const runBase={id:Id,sessionId:Id.nullable(),revision:Revision,previewId:Id,previewRevision:Revision,modelRevision:text(200),promptVersion:text(100),createdAt:instant,updatedAt:instant,myRating:VoteValue.nullable().optional()};
 export const RunErrorV2=z.enum(['RUN_INTERRUPTED','MODEL_TIMEOUT','MODEL_UNAVAILABLE','MODEL_INVALID_OUTPUT','MODEL_REFUSED','PREVIEW_STALE','INPUT_TOO_LARGE','CONFIGURATION_ERROR']);
 function runVariant<K extends keyof typeof modelOutputsV2>(kind:K){return z.discriminatedUnion('status',[
   z.strictObject({...runBase,kind:z.literal(kind),status:z.literal('pending'),phase:z.enum(['queued','running']),queuePosition:z.number().int().nonnegative().nullable(),output:z.null(),errorCode:z.null()}),
@@ -134,9 +137,10 @@ export const AssessmentSubmit=z.strictObject({id:Id,contentVersion:text(100),exp
 export const AssessmentResult=z.strictObject({id:Id,kind:z.enum(['baseline','followup']),scores:z.array(z.strictObject({questionId:text(100),score:z.number().int().min(0).max(2),rationale:text(1000)})).min(3).max(5),completedAt:instant,followupEligibleAt:instant.nullable(),notice:z.literal('Учебный результат, не оценка эмпатии и не доказательство психологического эффекта')});
 export const SkillAttempt=z.strictObject({id:Id,skill:Skill,score:z.number().int().min(0).max(2),rationale:text(1000),sourceRunId:Id,createdAt:instant});
 export const ProgressV2=z.strictObject({analyzedSessions:z.number().int().nonnegative(),completedExercises:z.number().int().nonnegative(),completedRoleplays:z.number().int().nonnegative(),completedDailyPractices:z.number().int().nonnegative(),completedCards:z.number().int().nonnegative(),streak:z.strictObject({current:z.number().int().nonnegative(),best:z.number().int().nonnegative(),lastCompletedLocalDate:date.nullable()}),skills:z.array(z.strictObject({skill:Skill,completedAttempts:z.number().int().nonnegative(),latestScore:z.number().int().min(0).max(2).nullable()})).max(4),latestTip:text(500).nullable(),followupEligibleAt:instant.nullable()});
-export const Vote=z.strictObject({runId:Id,value:z.enum(['useful','not_useful'])});
-export const StageEvent=z.strictObject({name:z.enum(['onboarding_started','onboarding_completed','preview_created','preview_confirmed','run_completed','practice_completed','card_completed','assessment_completed']),contextType:ContextType.optional(),resourceId:Id.optional()});
-export const OperationalAnalytics=z.strictObject({events:z.array(z.strictObject({name:StageEvent.shape.name,count:z.number().int().nonnegative()})),contexts:z.array(z.strictObject({contextType:ContextType,count:z.number().int().nonnegative()})),usefulness:z.strictObject({useful:z.number().int().nonnegative(),notUseful:z.number().int().nonnegative()})});
+export const Vote=z.strictObject({runId:Id,value:VoteValue});
+export const DomainStageEventName=z.enum(['onboarding_started','onboarding_completed','preview_created','preview_confirmed','run_completed','practice_completed','card_completed','assessment_completed']);
+export const StageEvent=z.strictObject({name:DomainStageEventName.exclude(['run_completed']),contextType:ContextType.optional(),resourceId:Id.optional()});
+export const OperationalAnalytics=z.strictObject({events:z.array(z.strictObject({name:DomainStageEventName,count:z.number().int().nonnegative()})),contexts:z.array(z.strictObject({contextType:ContextType,count:z.number().int().nonnegative()})),usefulness:z.strictObject({useful:z.number().int().nonnegative(),notUseful:z.number().int().nonnegative()})});
 export const AnalyticsWindow=z.strictObject({from:instant,to:instant}).refine(value=>{const span=Date.parse(value.to)-Date.parse(value.from);return span>0&&span<=31*86400000;});
 export const SupportLocation=z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/).nullable(),region:text(100).nullable()}).refine(value=>value.countryCode!==null||value.region===null);
 export const SupportRegionSetting=SupportLocation.safeExtend({revision:Revision});
@@ -172,7 +176,7 @@ const write=<I extends Schema,O extends Schema>(input:I,response:O)=>({input,res
 export const operations={
   account:read(Empty,Account),updateAccount:write(AccountPatch,Account),acceptConsent:write(ProductConsentAcceptance,Account),revokeConsent:write(Empty,z.null()),
   emailVerification:read(Empty,EmailVerificationStatus),requestEmailCode:write(EmailRequest,EmailVerificationStatus),resendEmailCode:write(ResendEmailCode,EmailVerificationStatus),verifyEmailCode:write(EmailVerification,EmailVerificationResult),
-  dialogue:read(Empty,DialogueV2),updateDialogue:write(DialoguePatch,DialogueV2),resetDialogue:write(z.strictObject({expectedRevision:Revision}),DialogueV2),
+  dialogue:read(Empty,DialogueV2),updateDialogue:write(DialoguePatch,DialogueV2),resetDialogue:write(ResetDialogue,DialogueV2),
   createSession:write(SessionInputV2,SessionV2),sessions:read(HistoryQuery,SessionPageV2),session:read(Resource,SessionDetailV2),updateSession:write(UpdateSessionV2,SessionV2),
   deleteSession:write(Resource.extend({expectedRevision:Revision}),z.null()),deleteData:write(z.strictObject({confirmation:z.literal('DELETE_MY_LEARNING_DATA')}),z.null()),deleteAccount:write(z.strictObject({confirmation:z.literal('DELETE_MY_ACCOUNT')}),z.null()),
   createPreview:write(PreviewSource,Preview),preview:read(Resource,Preview),editPreview:write(EditPreview,Preview),confirmPreview:write(ConfirmPreview,PreviewReceipt),

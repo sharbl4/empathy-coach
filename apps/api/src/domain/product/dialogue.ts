@@ -17,7 +17,13 @@ export class Dialogues {
   next(prior:Dialogue,changes:Partial<Dialogue>){return DialogueV2.parse({...prior,...changes,revision:prior.revision+1,expiresAt:new Date(Math.min(this.store.now()+DIALOGUE_TTL_SECONDS*1000,Date.parse(prior.createdAt)+DIALOGUE_MAX_LIFETIME_SECONDS*1000)).toISOString()});}
   async shown(c:PoolClient,row:string,p:Snapshot){const db=(await c.query('SELECT value,expires_at FROM app.product_dialogues WHERE user_id=$1',[row])).rows[0];if(!db||db.expires_at.getTime()<=this.store.now())fail('PREVIEW_STALE');const state=DialogueV2.parse(db.value),nav=state.navigation;if((nav.kind!=='preview'&&nav.kind!=='preview_field')||nav.previewId!==p.id||nav.previewRevision!==p.revision||nav.snapshotHash!==p.snapshotHash)fail('PREVIEW_STALE');return nav;}
   async patch(ctx:UserContext,input:OperationInput<'updateDialogue'>,key:string){await this.ensure(ctx);return this.store.write(ctx,'updateDialogue',input,key,async(c,row,r)=>{
-    const prior=await this.read(c,row);if(prior.revision!==r.expectedRevision)fail('REVISION_CONFLICT');if(prior.navigation.kind==='assessment'&&(r.navigation.kind!=='assessment'||r.navigation.assessmentId!==prior.navigation.assessmentId||r.navigation.contentVersion!==prior.navigation.contentVersion))fail('REVISION_CONFLICT');if(!['onboarding','email','email_code','menu'].includes(r.step)){if(row.consent_version!=='web-telegram-2')fail('CONSENT_REQUIRED');if(!row.email_verified_at)fail('EMAIL_NOT_VERIFIED');}
+    const prior=await this.read(c,row);if(prior.revision!==r.expectedRevision)fail('REVISION_CONFLICT');
+    if(prior.navigation.kind==='assessment'){
+      const previous=prior.navigation,next=r.navigation;
+      if(next.kind!=='assessment'||next.assessmentId!==previous.assessmentId||next.contentVersion!==previous.contentVersion)fail('REVISION_CONFLICT');
+      if(next.answers.length<previous.answers.length||(r.step==='menu'&&JSON.stringify(next.answers)!==JSON.stringify(previous.answers)))fail('REVISION_CONFLICT');
+    }
+    if(!['onboarding','email','email_code','menu'].includes(r.step)){if(row.consent_version!=='web-telegram-2')fail('CONSENT_REQUIRED');if(!row.email_verified_at)fail('EMAIL_NOT_VERIFIED');}
     await this.references(c,row.id,r);const nav=r.navigation;
     if(nav.kind==='preview'||nav.kind==='preview_field'){
       const db=(await c.query('SELECT value,session_id FROM app.product_previews WHERE id=$1 AND user_id=$2',[nav.previewId,row.id])).rows[0];if(!db)fail('NOT_FOUND');if(db.session_id!==r.sessionId)fail('VALIDATION_ERROR');if(db.value.revision!==nav.previewRevision||db.value.snapshotHash!==nav.snapshotHash)fail('PREVIEW_STALE');if(nav.kind==='preview_field'&&!db.value.fields.some((f:{id:string;editable:boolean})=>f.id===nav.fieldId&&f.editable))fail('VALIDATION_ERROR');

@@ -1,4 +1,14 @@
-# Backend handoff · A1 2.2
+# Current acceptance · A1 2.2.1 · 2026-11-01
+
+Merged the complete reviewed candidate `b9d7557` (`test/stack-a1-nov01`, code candidate `6755408`) into the existing backend branch without replaying or replacing prior work. Shared contract `9cd742f` now provides `myRating`, explicit assessment discard and domain-only completion events. The earlier three browser failures below were addressed in the approved candidate and are historical, not the current acceptance report.
+
+Reviewed and accepted: owned run/get/list/detail vote projections, one atomic successful completion/event transaction, client rejection of `run_completed`, menu/restart preservation of the canonical assessment and explicit confirmed reset. Tightened the persistence guard further: menu cannot change answers, and changing step cannot silently shrink the saved answer prefix. Foreign vote/read tests use a freshly issued context after restart, so they actually test ownership rather than only an expired issuer.
+
+Immediate local handoff checks: **7 PostgreSQL/HTTP/lifecycle checks passed, zero skips**, including menu/restart/discard, owned votes/projections, invalid-output/no-success-event, real shared lifecycle and cookie/CSRF/logout. Separate fresh test/browser DBs applied all existing migrations twice; no new migration/schema/DTO was required for 2.2.1. API/test typecheck passed. Full build/shared/browser results will be recorded after the next local combined run; the integrator's prior results are in docs/handoff-v2.md and are not presented as independently rerun here. Live Telegram/SMTP/GPU/QQCloud remains separate.
+
+---
+
+# Archived backend handoff · A1 2.2
 
 Based on integration `436d17b` / contract `a71d379`, merged without rewriting the preceding checkpoint. Branch `feat/api-a1-v21` keeps its historical name; its current backend implements the 2.2 ProductFacade, HTTP and browser-adapter signatures. Root/contracts/bot/web sources were not modified by the backend port. The older sections below are archive material.
 

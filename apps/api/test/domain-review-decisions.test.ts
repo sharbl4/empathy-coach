@@ -11,6 +11,9 @@ test('2.2.1 menu and restart preserve partial assessment; only confirmed reset d
     const partial=await h.domain.updateDialogue(ctx,{expectedRevision:d.revision,step:'assessment',draft:{},navigation,sessionId:null,previewId:null,roleplayId:null},uid());
     const menu=await h.domain.updateDialogue(ctx,{expectedRevision:partial.revision,step:'menu',draft:{},navigation,sessionId:null,previewId:null,roleplayId:null},uid());
     await assert.rejects(h.domain.updateDialogue(ctx,{expectedRevision:menu.revision,step:'menu',draft:{},navigation:{kind:'none'},sessionId:null,previewId:null,roleplayId:null},uid()),code('REVISION_CONFLICT'));
+    for(const step of ['menu','assessment'] as const)await assert.rejects(h.domain.updateDialogue(ctx,{expectedRevision:menu.revision,step,draft:{},navigation:{...navigation,answers:[]},sessionId:null,previewId:null,roleplayId:null},uid()),code('REVISION_CONFLICT'));
+    const changed={...navigation,answers:[{questionId:form.tasks[0].id,choiceId:form.tasks[0].choices[1].id}]};
+    await assert.rejects(h.domain.updateDialogue(ctx,{expectedRevision:menu.revision,step:'menu',draft:{},navigation:changed,sessionId:null,previewId:null,roleplayId:null},uid()),code('REVISION_CONFLICT'));
     await h.restart();const restored=await h.domain.resolveUser(identity),saved=await h.domain.dialogue(restored,{});assert.equal(saved.step,'menu');assert.deepEqual(saved.navigation,navigation);
     await assert.rejects(h.domain.resetDialogue(restored,{expectedRevision:saved.revision},uid()),code('REVISION_CONFLICT'));
     assert.deepEqual((await h.domain.dialogue(restored,{})).navigation,navigation);
@@ -20,12 +23,12 @@ test('2.2.1 menu and restart preserve partial assessment; only confirmed reset d
 
 test('2.2.1 owned vote is read through every run projection after restart; completion is domain-only and unique',async()=>{
   const h=await productHarness();try{
-    await h.start();const {ctx,identity}=await h.verified(),{ctx:other}=await h.verified(),s=await h.domain.createSession(ctx,syntheticInput,uid());
+    await h.start();const {ctx,identity}=await h.verified(),otherUser=await h.verified(),s=await h.domain.createSession(ctx,syntheticInput,uid());
     const pending=await h.launch(ctx,{kind:'analysis',sessionId:s.id,expectedRevision:s.revision});assert.equal((await h.wait(ctx,pending.runId)).status,'succeeded');
     assert.equal((await h.domain.run(ctx,{id:pending.runId})).myRating,null);
     await h.domain.rateRun(ctx,{runId:pending.runId,value:'useful'},uid());await h.restart();const restored=await h.domain.resolveUser(identity);
     assert.equal((await h.domain.run(restored,{id:pending.runId})).myRating,'useful');assert.equal((await h.domain.runs(restored,{sessionId:s.id,limit:20})).items[0].myRating,'useful');assert.equal((await h.domain.session(restored,{id:s.id})).runs.items[0].myRating,'useful');
-    await h.domain.rateRun(restored,{runId:pending.runId,value:'not_useful'},uid());assert.equal((await h.domain.run(restored,{id:pending.runId})).myRating,'not_useful');await assert.rejects(h.domain.run(other,{id:pending.runId}),code('UNAUTHORIZED'));
+    await h.domain.rateRun(restored,{runId:pending.runId,value:'not_useful'},uid());assert.equal((await h.domain.run(restored,{id:pending.runId})).myRating,'not_useful');const other=await h.domain.resolveUser(otherUser.identity);await assert.rejects(h.domain.run(other,{id:pending.runId}),code('NOT_FOUND'));await assert.rejects(h.domain.rateRun(other,{runId:pending.runId,value:'useful'},uid()),code('NOT_FOUND'));
     await assert.rejects(h.domain.recordStage(restored,{name:'run_completed',resourceId:pending.runId} as never,uid()),code('VALIDATION_ERROR'));
     const events=await h.db.query("SELECT count(*)::int AS n FROM app.product_events WHERE user_id=$1 AND name='run_completed' AND resource_id=$2",[restored.accountId,pending.runId]);assert.equal(events.rows[0].n,1);
   }finally{await h.close();}

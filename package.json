@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/with-env.mjs --npm-run dev:workspaces",
     "dev:workspaces": "npm run build -w @between/contracts && concurrently -k \"npm run dev -w @between/api\" \"npm run dev -w @between/web\"",
-    "build": "npm run build -w @between/contracts && npm run build -w @between/web && npm run build -w @between/api",
+    "build": "npm run build -w @between/contracts && node scripts/build-web.mjs && npm run build -w @between/api",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "npm run build -w @between/contracts && npm run typecheck --workspaces",
     "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts scripts/test/*.test.mjs",

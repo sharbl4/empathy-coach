@@ -50,6 +50,8 @@ jobs:
       - run: npm test
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+        env:
+          VITE_API_MODE: fixtures
       - run: docker build -t empathy-coach:ci .
       - name: Container HTTP and database readiness
         shell: bash

@@ -27,6 +27,7 @@ npm start
 ```
 
 Contracts всегда собирается первым. E2E проверяет браузер и настоящий HTTP технического каркаса, не полную v1.
+Для release используйте корневой `npm run build`: web собирается с явным NODE_ENV=production даже при dev .env или test CI. CI дополнительно передаёт VITE_API_MODE=fixtures и проверяет, что fixture-адаптеров нет в production артефактах и регистрации. Это не проверка живой регистрации/писем.
 После build `npm run db:migrate` запускает принятый мигратор Димы с .env: checksum истории, advisory lock и транзакции. Для DB-тестов нужны NODE_ENV=test и отдельный TEST_DATABASE_URL, отличный от DATABASE_URL. В CI DB-тесты обязательны; локальный skip не является DB-проверкой.
 
 ```sh

@@ -2,12 +2,12 @@
 
 Этот раздел заменяет прежний статус ниже. Контракт опубликован: **9cd742fe46527710e1932035924358a85ea3df4c**, ветка `feat/web-telegram-integration`. Минимальная семантика: [contract-v2.2.1.md](contract-v2.2.1.md), точные сигнатуры: [facade-v2.2.md](facade-v2.2.md).
 
-**Общий исполняемый candidate: 6755408c3f9aea1f6766fa760e7e1de4b48747db, `test/stack-a1-nov01`.** Он содержит опубликованные backend **fabed230db9a139e8ff46a5a788ab852fa87eea2** (включает a2bb682 и перенос2.2), interfaces **f12d309e1d5ebe41f4344a3c7fcf5490c7b28556**, новый контракт и минимальные integration fixes. Это отдельная ветка для совместной проверки; GitHub PR22/23 не слиты, ветки участников не переписаны. Для запуска брать candidate целиком, не старый a2bb682 и не только contracts-ветку. Детали: [review-stack-2026-11-01.md](review-stack-2026-11-01.md).
+**Общий исполняемый candidate: b9d75571252286c85be280e44c62f3c60712c3de, `test/stack-a1-nov01`.** Integration fixes находятся в6755408; b9d7557 также включает опубликованный handoff. Он содержит опубликованные backend **fabed230db9a139e8ff46a5a788ab852fa87eea2** (включает a2bb682 и перенос2.2), interfaces **f12d309e1d5ebe41f4344a3c7fcf5490c7b28556**, новый контракт и минимальные integration fixes. Это отдельная ветка для совместной проверки; GitHub PR22/23 не слиты, ветки участников не переписаны. Для запуска брать candidate целиком, не старый a2bb682 и не только contracts-ветку. Детали: [review-stack-2026-11-01.md](review-stack-2026-11-01.md); текущий этап —[integration-progress.md](integration-progress.md).
 
 ```sh
 git fetch origin
 git switch -c integration-review-nov01 origin/test/stack-a1-nov01
-git merge-base --is-ancestor 6755408c3f9aea1f6766fa760e7e1de4b48747db HEAD
+git merge-base --is-ancestor b9d75571252286c85be280e44c62f3c60712c3de HEAD
 npm ci
 ```
 

@@ -1,5 +1,5 @@
 import {createRequire} from 'node:module';
-import {RuntimeEnvironment} from '@between/contracts/domain';
+import {LegacyRuntimeEnvironment as RuntimeEnvironment} from '@between/contracts/runtime';
 const {fetch,AbortSignal}=globalThis;
 const parsed=RuntimeEnvironment.safeParse(process.env);
 if(!parsed.success){console.error('BLOCKED current Telegram/local/SMTP configuration; values suppressed. No API calls made.');process.exit(1);}

@@ -1,7 +1,7 @@
 import {createRequire} from 'node:module';
-import {RuntimeEnvironmentV2} from '@between/contracts/product';
+import {RuntimeEnvironment} from '@between/contracts/runtime';
 const {fetch,AbortSignal}=globalThis;
-const parsed=RuntimeEnvironmentV2.safeParse(process.env);
+const parsed=RuntimeEnvironment.safeParse(process.env);
 if(!parsed.success){console.error('CONFIG_INVALID: current app/SMTP/model/web secrets required; values suppressed. No API calls made.');process.exit(1);}
 const config=parsed.data,{Pool}=createRequire(new URL('../apps/api/package.json',import.meta.url))('pg');
 const db=new Pool({connectionString:config.DATABASE_URL,max:1,connectionTimeoutMillis:3000,query_timeout:3000});

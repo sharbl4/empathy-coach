@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {RuntimeHealth} from '@between/contracts/product';
+import {RuntimeHealth} from '@between/contracts/runtime';
 try{
   const state=RuntimeHealth.parse(JSON.parse(readFileSync(process.argv[2]??join(tmpdir(),'between-application-health.json'),'utf8')));
   const age=Date.now()-Date.parse(state.heartbeatAt);

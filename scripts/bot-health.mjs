@@ -1,5 +1,5 @@
 import {readFileSync} from 'node:fs';
-import {BotHealth,BOT_HEALTH_FILE} from '@between/contracts/domain';
+import {BotHealth,BOT_HEALTH_FILE} from '@between/contracts/runtime';
 try{
   const file=process.argv[2]??BOT_HEALTH_FILE;
   const health=BotHealth.parse(JSON.parse(readFileSync(file,'utf8')));

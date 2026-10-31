@@ -1,3 +1,5 @@
+> Current approved A1 2.2: [runtime/persistence/support rules](contract-v2.2.md), [exact signatures](facade-v2.2.md), [handoff](handoff-v2.md). This supersedes older signatures below where changed.
+
 # A1 resolution · shared contract 2.1.0
 
 Normative addition to contract-v2.md. Supersedes missing/ambiguous email/error/security boundaries in31574f8. Source of truth: @between/contracts/product and /http; exact generated signatures and all27 features: facade-v2.1.md. Legacy /domain facade/options/error enums are archive-only; shared identity/account primitives are reused, not a second runtime contract.

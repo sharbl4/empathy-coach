@@ -19,7 +19,7 @@ export const webApi={
   cards:route('GET','/api/cards','cards'),card:route('GET','/api/cards/:id','card'),completeCard:route('POST','/api/cards/:id/complete','completeCard'),
   reminders:route('GET','/api/reminders','reminders'),updateReminders:route('PATCH','/api/reminders','updateReminders'),
   assessment:route('GET','/api/assessments/form','assessment'),submitAssessment:route('POST','/api/assessments/:id/submit','submitAssessment'),assessmentResults:route('GET','/api/assessments/results','assessmentResults'),
-  rateRun:route('POST','/api/runs/:runId/rating','rateRun'),recordStage:route('POST','/api/events','recordStage'),support:route('GET','/api/support','support'),
+  rateRun:route('POST','/api/runs/:runId/rating','rateRun'),recordStage:route('POST','/api/events','recordStage'),supportRegion:route('GET','/api/support/region','supportRegion'),updateSupportRegion:route('PATCH','/api/support/region','updateSupportRegion'),support:route('GET','/api/support','support'),
 } as const;
 /** Every auth route binds to the shared facade; redemption is the login exchange. */
 export const authBindings={

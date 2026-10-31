@@ -5,3 +5,5 @@ Use @between/contracts/product and /http DTOs, not copied BotDomain/client contr
 Identity from trusted private sender or verified server cookie only; UserContext issuer and account checked by domain. Preview confirmation precedes every generation. Model text is plain data, no execution.
 Persist stable intents/inbox/outbox, handle revisions, partial startup and shutdown. No live error fallback to fixtures; explicit test adapters reject production.
 No external issues/team messages without authorization. Preserve uncommitted plans, env, IDE and applied migrations. Report actual checks and remaining live gates.
+
+Current A1 2.2: server env schemas only /runtime; public product/http graph excludes it. Persist navigation/partial answers in domain, email only emailVerification, unknown support region yields no contacts. See contract-v2.2.md and current handoff; do not reuse old signatures silently.

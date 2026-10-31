@@ -153,3 +153,26 @@ legend { font-weight: 600; margin-bottom: 8px; padding: 0; }
 .onboarding ol { padding-left: 20px; }
 .modal { border: 0; border-radius: 14px; padding: 22px; max-width: min(480px, calc(100vw - 32px)); background: var(--surface); color: var(--ink); }
 .modal::backdrop { background: rgba(20, 32, 30, .45); }
+
+/* v2 additions */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mark { font: inherit; color: inherit; border: 0; border-bottom: 3px solid var(--accent); background: #fff4c9; padding: 0 2px; cursor: pointer; border-radius: 3px; }
+.mark sup { font-size: 11px; font-weight: 700; margin-right: 2px; }
+.mark-risky { background: #ffe0cc; border-bottom-style: double; border-bottom-color: #b8551d; }
+.mark-caution { background: #fff4c9; border-bottom-style: dashed; border-bottom-color: #8a6d00; }
+.mark-good { background: #e3f3df; border-bottom-style: solid; border-bottom-color: #2f6b2f; }
+.mark[aria-expanded=true] { outline: 2px solid var(--focus); }
+.mark-detail { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); margin-bottom: 12px; }
+.badge { display: inline-block; font-size: 13px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); margin-left: 6px; }
+.grid-form { display: grid; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.row .field { flex: 1 1 180px; }
+.turns { list-style: none; padding: 0; display: grid; gap: 8px; }
+.turn { display: grid; grid-template-columns: max-content 1fr max-content; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.turn-self { border-left: 4px solid var(--accent); }
+.turn-other { border-left: 4px solid #8a6d00; }
+select { font: inherit; padding: 8px 10px; border: 1px solid #b9c4bb; border-radius: 8px; background: #fff; min-height: 44px; }
+.chat { list-style: none; padding: 0; display: grid; gap: 8px; }
+.chat li { padding: 8px 12px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat .from-user { background: var(--accent-soft); justify-self: end; }
+.chat .from-assistant { background: #fff; border: 1px solid var(--line); }

@@ -15,7 +15,7 @@ test('local output guard rejects reasoning, partial JSON and truncated completio
   const content=JSON.stringify({observation:'Факт',feeling:'Растерянность',need:'Ясность',request:'Уточни время',message:'Когда удобно?',explanation:'Просьба без обвинения'});
   const completion={choices:[{finish_reason:'stop',message:{content}}]};
   assert.ok(checkedCompletion(completion,'say_direct'));
-  for(const changed of [{finish_reason:'length',message:{content}},{finish_reason:'stop',message:{content,reasoning_content:'private reasoning'}},{finish_reason:'stop',message:{content:'<think>trace</think>'+content}},{finish_reason:'stop',message:{content:'{'} }])assert.throws(()=>checkedCompletion({choices:[changed]},'say_direct'));
+  for(const changed of [{finish_reason:'length',message:{content}},{finish_reason:'stop',message:{content,reasoning_content:'private reasoning'}},{finish_reason:'stop',message:{content,refusal:'refused'}},{finish_reason:'stop',message:{content:'<think>trace</think>'+content}},{finish_reason:'stop',message:{content:'{'} }])assert.throws(()=>checkedCompletion({choices:[changed]},'say_direct'));
 });
 test('health requires live process, actual DB/lease/polling and recent heartbeat',()=>{
   const dir=mkdtempSync(join(tmpdir(),'between-health-')),file=join(dir,'health.json');

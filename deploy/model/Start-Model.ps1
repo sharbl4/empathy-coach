@@ -1,5 +1,5 @@
 #requires -Version 7.0
-param([Parameter(Mandatory)][string]$ModelRoot,[string]$BindAddress='127.0.0.1',[ValidateRange(0,99)][int]$GpuLayers=24,[ValidateRange(512,4096)][int]$Context=4096)
+param([Parameter(Mandatory)][string]$ModelRoot,[string]$BindAddress='127.0.0.1',[string]$CloudTailscaleIp,[ValidateRange(0,99)][int]$GpuLayers=24,[ValidateRange(512,4096)][int]$Context=4096)
 $ErrorActionPreference='Stop'
 $lock=Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'model-lock.json') | ConvertFrom-Json
 if($BindAddress -ne '127.0.0.1' -and $BindAddress -notmatch '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$'){throw 'Only loopback or the actual Tailscale IPv4 is allowed; never 0.0.0.0'}
@@ -17,6 +17,11 @@ if($BindAddress -ne '127.0.0.1'){
   if(-not $rule -or $rule.Enabled -ne 'True'){throw 'Run Set-ModelFirewall as administrator before private-network binding'}
   $filter=$rule | Get-NetFirewallAddressFilter
   if($filter.LocalAddress -notcontains $BindAddress){throw 'Firewall local address mismatch'}
+  if(-not $CloudTailscaleIp -or @($filter.RemoteAddress).Count -ne 1 -or $filter.RemoteAddress -notcontains $CloudTailscaleIp){throw 'Firewall must restrict exactly the configured cloud Tailscale IP'}
+  $portFilter=$rule | Get-NetFirewallPortFilter
+  $appFilter=$rule | Get-NetFirewallApplicationFilter
+  if($portFilter.Protocol -notin @('TCP','6') -or @($portFilter.LocalPort).Count -ne 1 -or $portFilter.LocalPort -notcontains '8080' -or $appFilter.Program -ne $exe){throw 'Firewall program/port mismatch'}
+  if(@(Get-NetFirewallProfile -PolicyStore ActiveStore | Where-Object {$_.Enabled -ne 'True' -or $_.DefaultInboundAction -ne 'Block'}).Count){throw 'Effective firewall must remain enabled/default inbound Block'}
 }
 $key=Join-Path $ModelRoot 'endpoint.key'
 if(-not(Test-Path -LiteralPath $key)){

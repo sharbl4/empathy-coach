@@ -49,7 +49,7 @@ Probe фактически вызывает /apply-template и требует п
 
 ```powershell
 pwsh -File deploy/model/Set-ModelFirewall.ps1 -ModelRoot 'D:\Models\BetweenLines' -HomeTailscaleIp '<home-tailnet-ip>' -CloudTailscaleIp '<cloud-tailnet-ip>'
-pwsh -File deploy/model/Start-Model.ps1 -ModelRoot 'D:\Models\BetweenLines' -BindAddress '<home-tailnet-ip>'
+pwsh -File deploy/model/Start-Model.ps1 -ModelRoot 'D:\Models\BetweenLines' -BindAddress '<home-tailnet-ip>' -CloudTailscaleIp '<cloud-tailnet-ip>'
 ```
 
 Скрипт не отключает firewall/не удаляет чужие правила/не меняет роутер. При overlap или default Allow он блокирует настройку и требует решения владельца. Start не принимает0.0.0.0. Для изменения адресов сначала вручную пересмотреть только правило BetweenLines-PrivateLLM.

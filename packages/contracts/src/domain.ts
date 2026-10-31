@@ -49,6 +49,9 @@ export const DomainFailure=z.strictObject({code:DomainErrorCode,requestId:text(1
 export const domainOutputs={analysis:Analysis,reply_feedback:ReplyFeedback,reply_examples:ReplyOptions,exercise:Exercise,exercise_feedback:ExerciseFeedback,roleplay_start:RoleplayMessageOutput,roleplay_turn:RoleplayOutput,roleplay_feedback:RoleplayFeedbackOutput,say_direct:SayDirectOutput} as const;
 export type DomainRun=z.infer<typeof DomainRun>;
 export type DomainFailure=z.infer<typeof DomainFailure>;
+export const DeliveryFailure=z.strictObject({code:z.enum(['CHAT_UNAVAILABLE','RATE_LIMITED','DELIVERY_FAILED']),retryAfterSeconds:z.number().int().min(0).max(300).optional()});
+/** Context is re-issued by the domain from an owned DB row, never deserialized from payload. */
+export interface DomainDelivery {readonly id:string;readonly context:UserContext;readonly run:DomainRun;readonly attempt:number;}
 type Input<S extends z.ZodType>=z.infer<S>;
 /** Direct method calls only. No Fastify, Supabase token or HTTP client between bot and domain. */
 export interface DomainFacade {
@@ -85,6 +88,9 @@ export interface DomainFacade {
   retry(ctx:UserContext,id:string,input:Input<typeof ExpectedRevision>,key:string):Promise<Input<typeof RunAccepted>>;
   run(ctx:UserContext,id:string):Promise<DomainRun>;
   progress(ctx:UserContext):Promise<Input<typeof Progress>>;
+  claimDeliveries(limit:number):Promise<DomainDelivery[]>;
+  completeDelivery(ctx:UserContext,id:string):Promise<void>;
+  failDelivery(ctx:UserContext,id:string,failure:Input<typeof DeliveryFailure>):Promise<void>;
   health():Promise<{database:boolean;pollerLease:boolean}>;
   close():Promise<void>;
 }

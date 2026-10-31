@@ -2,7 +2,7 @@
 
 ## Актуальная передача Telegram-only · 31.10.2026
 
-Всё ниже этого блока о web/Supabase/GigaChat — история, не текущая инструкция. Антон явно сменил runtime на Telegram + QQCloud bot/PG + локальная Windows-модель по private network. Рабочая ветка feat/telegram-integration. Первый контракт 860cd33de38af8baa25fb770e7757d9421ca85d1; актуальная сигнатура @between/contracts/domain дополнена updateCursor/claimUpdate/acknowledgeUpdate/shutdownSignal и private BotHealth до принятия участниками. Точный финальный commit передаётся в отчёте, не вычисляется по старому main.
+Всё ниже этого блока о web/Supabase/GigaChat — история, не текущая инструкция. Антон явно сменил runtime на Telegram + QQCloud bot/PG + локальная Windows-модель по private network. Рабочая ветка feat/telegram-integration. Первый контракт 860cd33de38af8baa25fb770e7757d9421ca85d1; актуальная сигнатура @between/contracts/domain дополнена updateCursor/claimUpdate/acknowledgeUpdate/shutdownSignal, durable delivery outbox и private BotHealth до принятия участниками. Точный финальный commit передаётся в отчёте, не вычисляется по старому main.
 
 Дима #15: apps/api/src/domain/facade.ts, типизированный createDomain, новые миграции/SMTP/local provider и domain*.test.ts. Даня #16: apps/bot/src/main.ts, private transport/scenarios и apps/bot/test/*.test.ts. Root metadata/entry/lock/CI ведёт Антон. Ответ/принятие от Димы пока не получены; не заявляется согласование за участника.
 

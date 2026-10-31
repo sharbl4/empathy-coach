@@ -19,7 +19,7 @@
     "test": "npm run test:contracts && node scripts/test-domain.mjs",
     "test:legacy": "npm run build -w @between/contracts && tsx --test apps/api/test/*.test.ts scripts/test/readiness.test.mjs scripts/test/env-launcher.test.mjs",
     "db:migrate": "node scripts/migrate.mjs",
-    "services:check": "node scripts/with-env.mjs scripts/telegram-services.mjs",
+    "services:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/telegram-services.mjs",
     "model:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/model-benchmark.mjs",
     "e2e": "node scripts/check-telegram-live.mjs",
     "start": "node scripts/launch-bot.mjs"

@@ -21,6 +21,8 @@ const samples=[];
 const input={title:'Проверка',situation:{message:'Давай поговорим завтра.',relationship:'Коллега',context:'Вымышленная учебная ситуация.',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}};
 async function request(path,body){const response=await fetch(new URL(path,`${base.replace(/\/$/,'')}/`),{method:'POST',redirect:'error',signal:AbortSignal.timeout(timeout),headers,body:JSON.stringify(body)});if(!response.ok)throw new Error();return response.json();}
 try{
+  const rootResponse=await fetch(new URL('/',base),{redirect:'error',signal:AbortSignal.timeout(timeout),headers:{Authorization:`Bearer ${key}`}});
+  if(rootResponse.ok&&rootResponse.headers.get('content-type')?.includes('text/html'))throw new Error();
   // Actual GGUF/Jinja rendering must prove an empty, closed thinking prefix.
   const template=await request('/apply-template',{messages:[{role:'user',content:'Синтетическая проверка.'}]});
   if(typeof template.prompt!=='string'||!/<think>\s*<\/think>\s*$/.test(template.prompt))throw new Error();

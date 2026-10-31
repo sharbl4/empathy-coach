@@ -1,4 +1,5 @@
 import type { OutputFor, SessionInput, ResponseFor } from '@between/contracts';
+import type {SayDirectRequest,SayDirectOutput} from '@between/contracts/domain';
 export const PROMPT_VERSION='analysis-v1';
 export interface LearningContext {session:SessionInput;analysis:OutputFor<'analysis'>;}
 export interface ReplyContext extends LearningContext {draft:string;}
@@ -15,6 +16,7 @@ export interface AiProvider {
   roleplayStart?(input:RoleplayContext,signal:AbortSignal):Promise<OutputFor<'roleplay_start'>>;
   roleplayTurn?(input:RoleplayContext,signal:AbortSignal):Promise<OutputFor<'roleplay_turn'>>;
   roleplayFinish?(input:RoleplayContext,signal:AbortSignal):Promise<OutputFor<'roleplay_feedback'>>;
+  sayDirect?(input:{session:SessionInput;request:ReturnType<typeof SayDirectRequest.parse>},signal:AbortSignal):Promise<ReturnType<typeof SayDirectOutput.parse>>;
 }
 export class ModelError extends Error {
   constructor(public code:'MODEL_TIMEOUT'|'MODEL_UNAVAILABLE'|'MODEL_INVALID_OUTPUT'|'MODEL_REFUSED'|'CONFIGURATION_ERROR') {super(code);}

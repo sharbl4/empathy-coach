@@ -9,3 +9,7 @@ node_modules
 test-results
 playwright-report
 node-shasums.txt
+.vscode
+*.gguf
+*.dump
+*.backup

@@ -1,23 +1,10 @@
-name: CI
+name: Telegram CI
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  foundation:
+  contracts-and-root:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17.6-bookworm
-        env:
-          POSTGRES_USER: empathy
-          POSTGRES_PASSWORD: ci_only
-          POSTGRES_DB: empathy_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U empathy -d empathy_test"
-          --health-interval 5s --health-timeout 3s --health-retries 10
-    env:
-      DATABASE_URL: postgresql://empathy:ci_only@127.0.0.1:5432/empathy_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,40 +12,55 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - name: Enable real storage tests when migrations exist
-        id: storage
-        shell: bash
-        run: |
-          if test -f apps/api/src/db/migrate.ts; then
-            docker exec '${{ job.services.postgres.id }}' createdb -U empathy empathy_storage_test
-            echo 'TEST_DATABASE_URL=postgresql://empathy:ci_only@127.0.0.1:5432/empathy_storage_test' >> "$GITHUB_ENV"
-            echo 'NODE_ENV=test' >> "$GITHUB_ENV"
-            echo 'enabled=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'Storage migrations are not implemented on this ref; foundation checks only.'
-          fi
       - run: npm run lint
-      - run: npm run typecheck
-      - name: Migrate runtime and empty storage databases
-        if: steps.storage.outputs.enabled == 'true'
-        shell: bash
+      - run: npm run test:contracts
+      - run: node scripts/check-compose.mjs
+      - name: Parse Windows deployment scripts without running installers/firewall
+        shell: pwsh
         run: |
-          npm run build -w @between/api
+          Get-ChildItem deploy/model/*.ps1 | ForEach-Object {
+            $parseTokens=$null; $parseErrors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$parseTokens,[ref]$parseErrors) | Out-Null
+            if($parseErrors.Count){throw "PowerShell syntax errors in $($_.Name)"}
+          }
+  domain-bot-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: empathy
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: empathy_runtime
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U empathy -d empathy_runtime"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://empathy:ci_only@127.0.0.1:5432/empathy_runtime
+      TEST_DATABASE_URL: postgresql://empathy:ci_only@127.0.0.1:5432/empathy_domain_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build real facade and Telegram entry; missing participants block integration
+        run: npm run build
+      - run: npm run typecheck
+      - name: Migrations on empty runtime and isolated DB, repeated safely
+        run: |
+          docker exec '${{ job.services.postgres.id }}' createdb -U empathy empathy_domain_test
           npm run db:migrate
           DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
           DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate
-      - run: npm test
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
-        env:
-          VITE_API_MODE: fixtures
-      - run: docker build -t empathy-coach:ci .
-      - name: Container HTTP and database readiness
-        shell: bash
+      - name: Required new facade DB tests and transport tests, never legacy substitutes
+        run: npm test
+      - run: docker build -t between-telegram:${{ github.sha }} .
+      - name: Production dependency closure and import without user-facing server
         run: |
-          docker run -d --name empathy-ci --network host -e DATABASE_URL="$DATABASE_URL" empathy-coach:ci
-          trap 'docker rm -f empathy-ci >/dev/null' EXIT
-          curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:3000/api/health/ready
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/missing)" = 404
-# Storage tests become mandatory as soon as migrate.ts exists; no opt-in skip in CI.
-# Real external Auth/model/email remain separate live release gates.
+          timeout 10s docker run --rm between-telegram:${{ github.sha }} node --input-type=module -e "const m=await import('@between/api');if(typeof m.createDomain!=='function')process.exit(1)"
+# Real test-bot/QQCloud/home-GPU/SMTP/network/load/phone gates remain separate.

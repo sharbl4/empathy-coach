@@ -7,4 +7,4 @@ for(const [name,route] of Object.entries(api)){
   if('body' in route)doc+=`Запрос:\n\n<!-- schema:${name}.body -->\n\`\`\`json\n${JSON.stringify(requestFixtures[name],null,2)}\n\`\`\`\n\n`;
   doc+=`Ответ:\n\n<!-- schema:${name}.response -->\n\`\`\`json\n${JSON.stringify(responseFixtures[name],null,2)}\n\`\`\`\n\n`;
 }
-writeFileSync('docs/api.md',doc.trimEnd()+'\n');
+writeFileSync('docs/archive/http-api-v0.1.md',doc.trimEnd()+'\n');

@@ -9,3 +9,9 @@ test-results/
 .tools/
 node-shasums.txt
 *.log
+*.gguf
+*.dump
+*.backup
+model-install-evidence.json
+model-benchmark.json
+resource-report.json

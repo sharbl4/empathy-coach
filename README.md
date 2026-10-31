@@ -1,55 +1,32 @@
 # Между строк
 
-Foundation v0.1.0 для полной v1 по [hackathon-prompts.md](hackathon-prompts.md).
-В main приняты foundation, серверное хранение, runs/GigaChat и учебные API. Веб-аккаунты проходят отдельное review; живой вход пользователя и результат генерации не считаются проверенными. OAuth/список моделей и подключение к сервисам проверены отдельно, это не полный live-путь.
+Telegram-тренажёр понимания чувств в переписке. Хакатон «Город героев», тема «Чувствовать».
 
-Node 24.22.1 LTS (`.nvmrc`), npm workspaces. Точные зависимости и транзитивные версии — package-lock.json.
+Решение Антона 31.10.2026 заменяет web/Supabase/GigaChat runtime: только личные Telegram-чаты. QQCloud 1 CPU/2 ГБ: один Node-процесс bot+domain и PostgreSQL. Модель на другом домашнем Windows-ПК через закрытую сеть. Нет сайта, Mini App и внешнего inference API.
+
+Node 24.22.1 LTS, npm workspaces, TS, Zod и pg сохранены. packages/contracts/domain — общая фасада; apps/api — библиотека, apps/bot — transport. apps/web и старые HTTP-адаптеры архивные. Миграции/данные сохраняются.
+
+Первый contract commit: 860cd33de38af8baa25fb770e7757d9421ca85d1. [Дима #15](https://github.com/sharbl4/empathy-coach/issues/15) реализует фасаду/миграции; [Даня #16](https://github.com/sharbl4/empathy-coach/issues/16) — bot. Отправленная задача не означает принятия контракта. Пока createDomain/entry отсутствуют, integration build должен блокироваться явно.
+
+## Команды
 
 ```sh
 npm ci
-cp .env.example .env
-docker compose up -d db
-npm run dev
-```
-
-В PowerShell вместо cp: `Copy-Item .env.example .env`. Web: http://localhost:5173; API: http://localhost:3000.
-Vite проксирует /api; production Fastify отдаёт web/dist с одного origin.
-Не заполняйте env секретами в Git. Пустые Supabase/GigaChat настройки означают отсутствие подключённых сервисов.
-
-```sh
+npm run test:contracts
 npm run lint
 npm run typecheck
-npm test
-npx playwright install chromium
-npm run e2e
 npm run build
+# Fill current .env locally; separate test bot/database mandatory.
+docker compose up -d db
+npm run db:migrate
+npm run dev
 npm start
 ```
 
-Contracts всегда собирается первым. E2E проверяет браузер и настоящий HTTP технического каркаса, не полную v1.
-Для release используйте корневой `npm run build`: web собирается с явным NODE_ENV=production даже при dev .env или test CI. CI дополнительно передаёт VITE_API_MODE=fixtures и проверяет, что fixture-адаптеров нет в production артефактах и регистрации. Это не проверка живой регистрации/писем.
-После build `npm run db:migrate` запускает принятый мигратор Димы с .env: checksum истории, advisory lock и транзакции. Для DB-тестов нужны NODE_ENV=test и отдельный TEST_DATABASE_URL, отличный от DATABASE_URL. В CI DB-тесты обязательны; локальный skip не является DB-проверкой.
+Contracts всегда первым; release build только contracts/api/bot. dev/start не запускают Vite/Fastify. Старый личный .env автоматически не перезаписывается. Секреты заполнить локально по актуальному .env.example.
 
-```sh
-docker build -t empathy-coach:foundation .
-docker run --rm --env-file .env -p 3000:3000 empathy-coach:foundation
-```
+services:check проверяет PG/getMe/webhook без polling/генерации. model:check -- --requests 10 выполняет явные синтетические генерации; это не E2E. test:legacy сохраняет прежние HTTP/model adapter тесты, не подтверждает новый runtime.
 
-В контейнере DATABASE_URL должен указывать на доступную внешнюю БД, не localhost.
-Подробности: [контракт](docs/api.md), [архитектура и SQL](docs/architecture.md), [приёмка](docs/acceptance.md), [деплой и доступы](docs/deploy.md), [передача](docs/handoff.md).
+На доступном ПК только Intel Graphics, nvidia-smi/Tailscale не найдены. RTX находится на другом ПК владельца; модель/VRAM/QQCloud/закрытая сеть здесь не проверены.
 
-Основной хостинг — облако организаторов. Публичный staging URL пока не предоставлен.
-
-В текущей Windows-папке Node скачан с nodejs.org и проверен по официальному SHA256; переносимая копия игнорируется Git. Для этой копии перед командами:
-
-```powershell
-$env:Path = "$PWD\.tools\node-v24.22.1-win-x64;$env:Path"
-npm.cmd run dev
-```
-
-В новом clone установите Node версии `.nvmrc`. Private GitHub: https://github.com/sharbl4/empathy-coach.
-
-Настройка Supabase Auth/SMTP, GigaChat и локальная контрольная точка: [docs/services.md](docs/services.md).
-Проекты политики конфиденциальности, отдельного согласия и правил безопасности для веба и планируемого Telegram-бота: [docs/legal/README.md](docs/legal/README.md). До публичного сбора данных нужно закрыть указанные там условия; наличие документов не подтверждает соответствие текущих внешних сервисов требованиям РФ.
-`npm run services:check` проверяет доступность без генерации; `npm run checkpoint:live` — явный live-путь после готовности модулей и dev/test env. Foundation CI не подтверждает этот путь.
-Эти команды, а также root dev/start используют launcher: CA из NODE_EXTRA_CA_CERTS применяется при старте дочернего Node. Если для GigaChat нужен официальный CA, укажите абсолютный локальный путь в .env; настройка описана в docs/services.md. Access token вручную не задаётся.
+[Runbook](docs/runbook.md), [архитектура](docs/architecture.md), [фасада](docs/domain-contract.md), [приёмка](docs/acceptance.md), [модель](docs/local-model.md), [демо](docs/demo.md). [Правовые документы](docs/legal/README.md) требуют обновления/утверждения под новые потоки; private network не доказывает выполнение 152-ФЗ.

@@ -1,13 +1,12 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {z} from 'zod';
 import {analysisFixture,assessmentFixture,cardFixture,directFixture,practiceFixture,reminderFixture} from '@between/contracts/product-fixtures';
-import type {Account,Delivery,DialogueV2,Example,Preview,PreviewSource,PrivateTelegramIdentity,ProductFacade,RoleplayV2,RunV2,SessionInputV2,UserContext} from '@between/contracts/product';
+import {DomainError,UPDATE_MAX_ATTEMPTS,domainRetryPolicy,type Account,type Delivery,type DialogueV2,type DomainFailure,type EmailVerificationStatus,type Example,type Preview,type PreviewSource,type PrivateTelegramIdentity,type ProductFacade,type RoleplayV2,type RunV2,type SessionInputV2,type UserContext} from '@between/contracts/product';
 
 // TEST-ONLY implementation of the v2 ProductFacade (only what the transport calls). Never imported by src/.
 type Acc=z.infer<typeof Account>;type Dlg=z.infer<typeof DialogueV2>;type Input=z.infer<typeof SessionInputV2>;
 type Pv=z.infer<typeof Preview>;type Run=z.infer<typeof RunV2>;type Role=z.infer<typeof RoleplayV2>;
-export class FakeProductError extends Error {requestId='test';constructor(public code:string) {super(code);}}
-const fail=(code:string):never=>{throw new FakeProductError(code);};
+const fail=(code:DomainFailure['code']):never=>{throw new DomainError({code,requestId:'test'});};
 const now=()=>new Date().toISOString();
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const mask=(v:string)=>{let n=0;const out=v.replace(/[\w.+-]+@[\w-]+\.[\w.]+/g,()=>{n++;return '[почта скрыта]';}).replace(/\+?\d[\d\s()-]{8,}\d/g,()=>{n++;return '[телефон скрыт]';});return {out,n};};
@@ -20,9 +19,12 @@ export class FakeProduct {
   calls:string[]=[];
   accounts=new Map<string,Acc>();
   dialogues=new Map<string,Dlg>();
-  receipts=new Map<string,{intentKey:string;status:'processing'|'completed'}>();
+  receipts=new Map<string,{intentKey:string;status:'processing'|'completed'|'retry_wait'|'failed';attempts:number;nextAttemptAt:string|null;failure:DomainFailure|null}>();
+  /** Simulated clock offset for retry_wait (tests advance it instead of sleeping). */
+  clockSkewMs=0;
   keys=new Map<string,{input:string;result:unknown}>();
-  challenges=new Map<string,{account:string;code:string}>();
+  challenges=new Map<string,{account:string;code:string;email:string;state:'sent'|'expired'|'locked';attempts:number;active:boolean;resendAfter:number}>();
+  deliveryFailsFor=new Set<string>();
   store=new Map<string,{owner:string;id:string;input:Input;revision:number;createdAt:string;updatedAt:string}>();
   previews=new Map<string,{owner:string;preview:Pv;source:z.infer<typeof PreviewSource>}>();
   runs=new Map<string,{owner:string;run:Run}>();
@@ -32,10 +34,13 @@ export class FakeProduct {
   reminderState={...reminderFixture};
   lastCode='';modelCalls=0;offset=0;
   transient=new Map<string,number>();
+  /** method name → upcoming unknown (non-domain) errors, to check they are terminal. */
+  unknown=new Map<string,number>();
 
   private enter(name:string,ctx?:UserContext) {
     this.calls.push(name);
     const left=this.transient.get(name)??0;if(left>0){this.transient.set(name,left-1);fail('DEPENDENCY_UNAVAILABLE');}
+    const bug=this.unknown.get(name)??0;if(bug>0){this.unknown.set(name,bug-1);throw new TypeError('unexpected bug with private detail');}
     if(ctx&&(!this.issued.has(ctx)||!this.accounts.has(ctx.accountId)))fail('UNAUTHORIZED');
     return ctx?this.accounts.get(ctx.accountId)!:undefined;
   }
@@ -56,8 +61,29 @@ export class FakeProduct {
     if(!a){a={id:randomUUID(),telegramUserId:identity.telegramUserId,displayName:'Участник',emailVerified:false,consentVersion:null,onboardingCompletedAt:null};this.accounts.set(a.id,a);}
     const ctx=Object.freeze({accountId:a.id,telegramUserId:a.telegramUserId,transport:'telegram'}) as UserContext;this.issued.add(ctx);return ctx;
   }
-  async claimUpdate(ctx:UserContext,updateId:string) {this.enter('claimUpdate',ctx);if(!this.receipts.has(updateId))this.receipts.set(updateId,{intentKey:randomUUID(),status:'processing'});return {updateId,...this.receipts.get(updateId)!};}
-  async acknowledgeUpdate(updateId:string) {this.enter('acknowledgeUpdate');const r=this.receipts.get(updateId);if(r)r.status='completed';else this.receipts.set(updateId,{intentKey:randomUUID(),status:'completed'});this.offset=Math.max(this.offset,Number(updateId)+1);}
+  private receipt(updateId:string) {const r=this.receipts.get(updateId)!;return {updateId,intentKey:r.intentKey,status:r.status,attempts:r.attempts,nextAttemptAt:r.nextAttemptAt,failure:r.failure};}
+  async claimUpdate(ctx:UserContext,updateId:string) {
+    this.enter('claimUpdate',ctx);
+    const r=this.receipts.get(updateId);
+    if(!r)this.receipts.set(updateId,{intentKey:randomUUID(),status:'processing',attempts:1,nextAttemptAt:null,failure:null});
+    else if(r.status==='retry_wait'&&Date.parse(r.nextAttemptAt!)<=Date.now()+this.clockSkewMs)Object.assign(r,{status:'processing',attempts:r.attempts+1,nextAttemptAt:null});
+    return this.receipt(updateId);
+  }
+  async recordUpdateFailure(ctx:UserContext,input:{updateId:string;failure:DomainFailure}) {
+    this.enter('recordUpdateFailure',ctx);
+    const r=this.receipts.get(input.updateId)!;
+    const retry=domainRetryPolicy(input.failure,'idempotent_mutation').retryable&&r.attempts<UPDATE_MAX_ATTEMPTS;
+    Object.assign(r,retry?{status:'retry_wait',nextAttemptAt:new Date(Date.now()+this.clockSkewMs+1000).toISOString(),failure:input.failure}:{status:'failed',nextAttemptAt:null,failure:input.failure});
+    return this.receipt(input.updateId);
+  }
+  async acknowledgeUpdate(updateId:string) {
+    this.enter('acknowledgeUpdate');
+    const r=this.receipts.get(updateId);
+    // A failed receipt stays failed: acknowledge only advances the cursor.
+    if(r&&r.status==='processing')r.status='completed';
+    else if(!r)this.receipts.set(updateId,{intentKey:randomUUID(),status:'completed',attempts:1,nextAttemptAt:null,failure:null});
+    this.offset=Math.max(this.offset,Number(updateId)+1);
+  }
   async claimDeliveries(limit:number):Promise<Delivery[]> {
     this.enter('claimDeliveries');const out:Delivery[]=[];
     for(const [id,d] of this.deliveries){
@@ -81,15 +107,38 @@ export class FakeProduct {
   async updateAccount(ctx:UserContext,input:{onboardingCompleted?:true},key:string) {const a=this.enter('updateAccount',ctx)!;return this.once(ctx,key,input,()=>{if(input.onboardingCompleted)a.onboardingCompletedAt??=now();return {...a};});}
   async acceptConsent(ctx:UserContext,input:{policyVersion:'web-telegram-2'},key:string) {const a=this.enter('acceptConsent',ctx)!;return this.once(ctx,key,input,()=>{a.consentVersion=input.policyVersion;return {...a};});}
   async revokeConsent(ctx:UserContext,_i:unknown,key:string) {const a=this.enter('revokeConsent',ctx)!;return this.once(ctx,key,{},()=>{a.consentVersion=null;return null;});}
+  private status(account:string):z.infer<typeof EmailVerificationStatus> {
+    const a=this.accounts.get(account)!;
+    const c=[...this.challenges.entries()].find(([,x])=>x.account===account&&x.active);
+    if(!c)return a.emailVerified?{state:'verified'}:{state:'none'};
+    const [challengeId,x]=c,masked=x.email.replace(/^(.{0,2})[^@]*(@.*)$/,'$1***$2');
+    const state=this.deliveryFailsFor.has(x.email)?'failed':x.state;
+    return {state:'challenge',challenge:{challengeId,state,maskedEmail:masked,expiresAt:new Date(Date.now()+600000).toISOString(),resendAfter:new Date(x.resendAfter).toISOString(),attemptsRemaining:x.attempts}};
+  }
+  private issue(account:string,email:string) {
+    for(const x of this.challenges.values())if(x.account===account)x.active=false;
+    const challengeId=randomUUID();this.lastCode=String(100000+Math.floor(Math.random()*899999));
+    this.challenges.set(challengeId,{account,code:this.lastCode,email,state:'sent',attempts:5,active:true,resendAfter:Date.now()+60000});
+  }
+  async emailVerification(ctx:UserContext) {this.enter('emailVerification',ctx);return this.status(ctx.accountId);}
   async requestEmailCode(ctx:UserContext,input:{email:string},key:string) {
     const a=this.enter('requestEmailCode',ctx)!;if(a.consentVersion!=='web-telegram-2')fail('CONSENT_REQUIRED');
-    return this.once(ctx,key,input,()=>{const challengeId=randomUUID();this.lastCode=String(100000+Math.floor(Math.random()*899999));this.challenges.set(challengeId,{account:ctx.accountId,code:this.lastCode});
-      return {challengeId,expiresAt:new Date(Date.now()+600000).toISOString(),resendAfter:new Date(Date.now()+60000).toISOString()};});
+    return this.once(ctx,key,input,()=>{this.issue(ctx.accountId,input.email);return this.status(ctx.accountId);});
+  }
+  async resendEmailCode(ctx:UserContext,input:{challengeId:string},key:string) {
+    this.enter('resendEmailCode',ctx);
+    return this.once(ctx,key,input,()=>{
+      const x=this.challenges.get(input.challengeId);if(!x||x.account!==ctx.accountId)fail('NOT_FOUND');
+      if(!x!.active)fail('REVISION_CONFLICT');if(Date.now()+this.clockSkewMs<x!.resendAfter)fail('RATE_LIMITED');
+      this.issue(ctx.accountId,x!.email);return this.status(ctx.accountId);
+    });
   }
   async verifyEmailCode(ctx:UserContext,input:{challengeId:string;code:string},key:string) {
-    const a=this.enter('verifyEmailCode',ctx)!,c=this.challenges.get(input.challengeId);
-    if(!c||c.account!==ctx.accountId)fail('CODE_EXPIRED');if(c!.code!==input.code)fail('CODE_INVALID');
-    return this.once(ctx,key,input,()=>{this.challenges.delete(input.challengeId);a.emailVerified=true;return {...a};});
+    const a=this.enter('verifyEmailCode',ctx)!,x=this.challenges.get(input.challengeId);
+    if(!x||x.account!==ctx.accountId)fail('NOT_FOUND');if(!x!.active)fail('REVISION_CONFLICT');
+    if(x!.state==='locked')fail('CODE_INVALID');
+    if(x!.code!==input.code){x!.attempts--;if(x!.attempts<=0)x!.state='locked';fail('CODE_INVALID');}
+    return this.once(ctx,key,input,()=>{x!.active=false;a.emailVerified=true;return {account:{...a},verification:{state:'verified' as const}};});
   }
   async recordStage(ctx:UserContext) {this.enter('recordStage',ctx);return null;}
   async deleteData(ctx:UserContext,input:unknown,key:string) {this.enter('deleteData',ctx);return this.once(ctx,key,input,()=>{for(const [id,s] of this.store)if(s.owner===ctx.accountId)this.store.delete(id);return null;});}
@@ -144,7 +193,7 @@ export class FakeProduct {
       let count=0;
       const fields=raw.map(([label,value])=>{const m=mask(value);count+=m.n;return {id:randomUUID(),label,value:m.out,editable:true};});
       const safety=fields.some(x=>/убью тебя/i.test(x.value))?'support' as const:'none' as const;
-      const preview:Pv={id:randomUUID(),revision:1,kind:source.kind,sessionId,sessionRevision,fields,turns:[],redactionCount:count,budget:{contextWindow:4096,templateTokens:100,systemTokens:200,inputTokens:50,maxOutputTokens:1400,reserveTokens:128,fit:'fits'},modelRevision:'synthetic',promptVersion:'between-product-v2',snapshotHash:hash(fields),confirmedAt:null,safety};
+      const preview:Pv={id:randomUUID(),revision:1,kind:source.kind,sessionId,sessionRevision,dependencies:sessionId?[{kind:'session',id:sessionId,revision:sessionRevision!}]:[],templateHash:'b'.repeat(64),fields,turns:[],redactionCount:count,budget:{contextWindow:4096,templateTokens:100,systemTokens:200,inputTokens:50,maxOutputTokens:1400,reserveTokens:128,fit:'fits'},modelRevision:'synthetic',promptVersion:'between-product-v2',snapshotHash:hash(fields),confirmedAt:null,safety};
       this.previews.set(preview.id,{owner:ctx.accountId,preview,source});return preview;
     });
   }
@@ -163,11 +212,11 @@ export class FakeProduct {
       if(pv.revision!==input.expectedRevision||pv.snapshotHash!==input.snapshotHash)fail('PREVIEW_STALE');pv.confirmedAt=now();
       return {id:pv.id,revision:pv.revision,snapshotHash:pv.snapshotHash,confirmedAt:pv.confirmedAt,expiresAt:new Date(Date.now()+600000).toISOString()};});
   }
-  async startRun(ctx:UserContext,input:{previewId:string;previewRevision:number;expectedSessionRevision:number|null},key:string) {
+  async startRun(ctx:UserContext,input:{previewId:string;previewRevision:number;snapshotHash:string;expectedSessionRevision:number|null},key:string) {
     this.learning('startRun',ctx);
     return this.once(ctx,key,input,()=>{
       const p=this.previews.get(input.previewId);if(!p||p.owner!==ctx.accountId)fail('NOT_FOUND');const pv=p!.preview;
-      if(!pv.confirmedAt)fail('PREVIEW_NOT_CONFIRMED');if(pv.revision!==input.previewRevision)fail('PREVIEW_STALE');
+      if(!pv.confirmedAt)fail('PREVIEW_NOT_CONFIRMED');if(pv.revision!==input.previewRevision||pv.snapshotHash!==input.snapshotHash)fail('PREVIEW_STALE');
       if([...this.runs.values()].some(r=>r.owner===ctx.accountId&&r.run.status==='pending'))fail('OPERATION_IN_PROGRESS');
       let resourceId:string|undefined;const src=p!.source;
       if(src.kind==='roleplay_start'){resourceId=randomUUID();this.roles.set(resourceId,{owner:ctx.accountId,role:{id:resourceId,sessionId:pv.sessionId!,revision:pv.sessionRevision!,difficulty:src.difficulty,status:'active',turnCount:0,messages:[],feedback:null}});}
@@ -177,8 +226,9 @@ export class FakeProduct {
     });
   }
   async run(ctx:UserContext,q:{id:string}) {this.learning('run',ctx);const r=this.runs.get(q.id);if(!r||r.owner!==ctx.accountId||(r.run.sessionId&&!this.store.has(r.run.sessionId)))fail('NOT_FOUND');return structuredClone(r!.run);}
-  async retry(ctx:UserContext,input:{id:string;previewId:string;previewRevision:number},key:string) {
+  async retry(ctx:UserContext,input:{id:string;previewId:string;previewRevision:number;snapshotHash:string},key:string) {
     this.learning('retry',ctx);const r=this.runs.get(input.id);if(!r||r.owner!==ctx.accountId)fail('NOT_FOUND');
+    if(this.previews.get(input.previewId)?.preview.snapshotHash!==input.snapshotHash)fail('PREVIEW_STALE');
     return this.once(ctx,key,input,()=>{const run={...structuredClone(r!.run),id:randomUUID(),status:'pending',phase:'queued',queuePosition:1,output:null,errorCode:null} as Run;this.runs.set(run.id,{owner:ctx.accountId,run});return {runId:run.id};});
   }
   async rateRun(ctx:UserContext,input:{runId:string;value:string},key:string) {this.learning('rateRun',ctx);await this.run(ctx,{id:input.runId});return this.once(ctx,key,input,()=>{this.votes.set(`${ctx.accountId}:${input.runId}`,input.value);return input;});}

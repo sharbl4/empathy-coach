@@ -1,5 +1,5 @@
 import type {z} from 'zod';
-import {ProductErrorCode,type Account,type ComposerDraft,type ContextType,type Delivery,type Difficulty,type DialogueV2,type Goal,type LearningMode,type PreviewSource,type ProductFacade,type RunV2,type SessionInputV2,type UserContext} from '@between/contracts/product';
+import {normalizeDomainError,type Account,type EmailVerificationStatus,type ComposerDraft,type ContextType,type Delivery,type Difficulty,type DialogueV2,type Goal,type LearningMode,type PreviewSource,type ProductFacade,type RunV2,type SessionInputV2,type UserContext} from '@between/contracts/product';
 import {type Callback,intentKey} from './callbacks.js';
 import type {TelegramApi} from './telegram.js';
 import * as T from './text.js';
@@ -9,7 +9,7 @@ type Draft=z.infer<typeof ComposerDraft>;
 type Dlg=z.infer<typeof DialogueV2>;
 type Step=Dlg['step'];
 type AccountValue=z.infer<typeof Account>;
-type Code=z.infer<typeof ProductErrorCode>;
+type Status=z.infer<typeof EmailVerificationStatus>;
 type Run=z.infer<typeof RunV2>;
 type Mode=z.infer<typeof LearningMode>;
 type Ctx=z.infer<typeof ContextType>;
@@ -22,14 +22,13 @@ export interface Turn {
   intent:string;seq:number;
 }
 
-/** Domain failures carry a safe ProductErrorCode; anything else is treated as transient by the poller. */
-export function failureCode(error:unknown):Code|null {
-  const code=error&&typeof error==='object'&&'code' in error?(error as {code:unknown}).code:undefined;
-  const parsed=ProductErrorCode.safeParse(code);
-  return parsed.success?parsed.data:null;
-}
-const TRANSIENT=new Set<Code>(['DEPENDENCY_UNAVAILABLE','INTERNAL_ERROR']);
-export const isTransient=(error:unknown)=>{const code=failureCode(error);return code===null||TRANSIENT.has(code);};
+/** Shared contract normalizer: unknown errors become INTERNAL_ERROR, never a retryable dependency failure. */
+export const failureCode=(error:unknown)=>normalizeDomainError(error,'bot').code;
+/**
+ * Escalate to the poller (recordUpdateFailure decides retry_wait or failed) only for infrastructure failures
+ * and unknown errors; every other domain code is a definite outcome explained to the user.
+ */
+export const escalates=(error:unknown)=>{const code=failureCode(error);return code==='DEPENDENCY_UNAVAILABLE'||code==='INTERNAL_ERROR';};
 
 const POLICY='web-telegram-2';
 const GOALS:GoalValue[]=['support','clarify','reconcile','boundary'];
@@ -51,7 +50,7 @@ const nextField=(d:Draft)=>d.mode?ORDER[d.mode].find(k=>d[k]===undefined):undefi
 const sourceKind=(mode:Mode)=>mode==='understand'||mode==='thread'?'analysis' as const:mode;
 
 /** Navigation-only memory (not learning data). Lost on restart; every path then asks again. Contract gaps are listed in README. */
-interface Memo {challengeId?:string;editingField?:string;speaker?:'self'|'other';cardId?:string;reminderField?:'time'|'timezone'|'quiet';assessment?:{id:string;kind:'baseline'|'followup';answers:{questionId:string;choiceId:string}[]};cursors?:(string|null)[];historyFilter?:Ctx|null}
+interface Memo {editingField?:string;speaker?:'self'|'other';cardId?:string;reminderField?:'time'|'timezone'|'quiet';assessment?:{id:string;kind:'baseline'|'followup';answers:{questionId:string;choiceId:string}[]};cursors?:(string|null)[];historyFilter?:Ctx|null}
 
 export class Flows {
   private memo=new Map<string,Memo>();
@@ -75,8 +74,8 @@ export class Flows {
 
   /** Definite domain outcome → user-facing text. Transient failures are rethrown so the update is retried, not acknowledged. */
   async explain(t:Turn,error:unknown) {
-    if(isTransient(error))throw error;
-    const retry=error&&typeof error==='object'&&'retryAfterSeconds' in error?Number((error as {retryAfterSeconds:unknown}).retryAfterSeconds):undefined;
+    if(escalates(error))throw error;
+    const retry=normalizeDomainError(error,'bot').retryAfterSeconds;
     switch(failureCode(error)){
       case 'REVISION_CONFLICT':{t.dlg=await this.domain.dialogue(t.ctx,{});return this.say(t,T.texts.conflict,menuRows());}
       case 'IDEMPOTENCY_CONFLICT':{t.dlg=await this.domain.dialogue(t.ctx,{});return this.say(t,T.texts.stale,menuRows());}
@@ -85,8 +84,7 @@ export class Flows {
       case 'RATE_LIMITED':return this.say(t,retry?`${T.texts.rateLimited} Можно через ${retry} с.`:T.texts.rateLimited,[[toMenu]]);
       case 'EMAIL_NOT_VERIFIED':return this.say(t,T.texts.needVerify);
       case 'CONSENT_REQUIRED':return this.say(t,T.texts.needConsent,[[f('Аккаунт','m','a')]]);
-      case 'CODE_INVALID':return this.say(t,'Код не подошёл. Проверь цифры из последнего письма.',[[f('Отправить код ещё раз','rs')]]);
-      case 'CODE_EXPIRED':return this.say(t,'Срок кода истёк или попытки закончились. Запроси новый.',[[f('Отправить код ещё раз','rs'),f('Сменить почту','ce')]]);
+      case 'CODE_INVALID':case 'CODE_EXPIRED':return this.emailStatus(t,await this.domain.emailVerification(t.ctx,{}),failureCode(error)==='CODE_INVALID'?'Код не подошёл.':'Срок кода истёк.');
       case 'PREVIEW_STALE':case 'PREVIEW_NOT_CONFIRMED':return this.say(t,T.texts.previewStale,[[f('История','m','h'),toMenu]]);
       case 'INPUT_TOO_LARGE':return this.say(t,T.texts.tooLarge,[[toMenu]]);
       case 'ASSESSMENT_NOT_DUE':return this.say(t,'Повторный тест пока недоступен — он откроется через 7 дней после входного.',[[toMenu]]);
@@ -152,7 +150,7 @@ export class Flows {
   private ops:Record<string,(t:Turn,arg:string,n:number)=>Promise<unknown>>={
     // onboarding / account
     ok:t=>this.acceptConsent(t),
-    rs:t=>this.go(t,'email').then(()=>this.say(t,'Напиши адрес ещё раз — отправлю новый код, старый перестанет действовать. Повторно — не чаще раза в минуту.')),
+    rs:t=>this.resend(t),
     ce:t=>this.go(t,'email').then(()=>this.say(t,T.texts.askEmail)),
     ac:(t,arg)=>this.accountAction(t,arg),
     ay:(t,arg)=>this.accountConfirm(t,arg),
@@ -192,8 +190,12 @@ export class Flows {
     pw:(t,runId,n)=>this.withRun(t,runId,run=>(run.kind==='reply_feedback'||run.kind==='before_send')&&run.status==='succeeded'?this.say(t,T.phraseDetail(run.output,n)??T.texts.notFound):this.say(t,T.texts.notFound)),
     up:(t,runId)=>this.rate(t,runId,'useful'),
     un:(t,runId)=>this.rate(t,runId,'not_useful'),
-    rt:(t,runId)=>this.withRun(t,runId,run=>run.status!=='failed'?this.say(t,T.texts.stale,menuRows()):
-      this.started(t,run.sessionId,this.domain.retry(t.ctx,{id:runId,previewId:run.previewId,previewRevision:run.previewRevision,expectedRevision:run.revision},this.key(t,'retry')))),
+    rt:(t,runId)=>this.withRun(t,runId,async run=>{
+      if(run.status!=='failed')return this.say(t,T.texts.stale,menuRows());
+      // Retry reuses exactly the confirmed snapshot of the failed run; a changed preview fails as PREVIEW_STALE.
+      const p=await this.domain.preview(t.ctx,{id:run.previewId});
+      return this.started(t,run.sessionId,this.domain.retry(t.ctx,{id:runId,previewId:run.previewId,previewRevision:run.previewRevision,snapshotHash:p.snapshotHash,expectedRevision:run.revision},this.key(t,'retry')));
+    }),
     // history
     hn:(t,arg)=>this.history(t,Number(arg)||0,this.m(t).historyFilter??null),
     hf:(t,arg)=>this.history(t,0,CONTEXTS.includes(arg as Ctx)?arg as Ctx:null),
@@ -217,19 +219,21 @@ export class Flows {
   private async start(t:Turn) {
     if(ready(t.account))return this.menu(t,'С возвращением!');
     await this.say(t,T.texts.greeting);
-    await this.domain.recordStage(t.ctx,{name:'onboarding_started'},this.key(t,'stage')).catch(error=>{if(isTransient(error))throw error;});
+    await this.domain.recordStage(t.ctx,{name:'onboarding_started'},this.key(t,'stage')).catch(error=>{if(escalates(error))throw error;});
     return this.resumeOnboarding(t);
   }
-  async resumeOnboarding(t:Turn) {
+  async resumeOnboarding(t:Turn):Promise<unknown> {
     const a=t.account;
     if(a.consentVersion!==POLICY){if(t.dlg.step!=='onboarding')await this.go(t,'onboarding');return this.say(t,T.texts.onboarding,[[b('Принимаю, продолжить','ok')],[f('Справка','help')]]);}
     if(!a.emailVerified){
-      if(t.dlg.step==='email_code')return this.say(t,'Введи 6 цифр из письма. Код действует 10 минут.',[[f('Отправить код ещё раз','rs'),f('Сменить почту','ce')],[f('Удалить аккаунт','ac','del')]]);
+      // Authoritative state comes from the domain DB, not process memory: works after restart.
+      const status=await this.domain.emailVerification(t.ctx,{});
+      if(status.state==='challenge'&&t.dlg.step!=='email')return this.emailStatus(t,status);
       if(t.dlg.step!=='email')await this.go(t,'email');
       return this.say(t,T.texts.askEmail,[[f('Удалить аккаунт','ac','del')]]);
     }
     t.account=await this.domain.updateAccount(t.ctx,{onboardingCompleted:true},this.key(t,'onboarding'));
-    await this.domain.recordStage(t.ctx,{name:'onboarding_completed'},this.key(t,'stage')).catch(error=>{if(isTransient(error))throw error;});
+    await this.domain.recordStage(t.ctx,{name:'onboarding_completed'},this.key(t,'stage')).catch(error=>{if(escalates(error))throw error;});
     return this.menu(t,'Готово, аккаунт подтверждён.');
   }
   private async acceptConsent(t:Turn) {
@@ -238,18 +242,47 @@ export class Flows {
   }
   private async emailInput(t:Turn,email:string) {
     if(email.length>254||!EMAIL.test(email))return this.say(t,'Это не похоже на адрес почты. Пример: name@example.com');
-    const challenge=await this.domain.requestEmailCode(t.ctx,{email},this.key(t,'email_code'));
-    this.m(t).challengeId=challenge.challengeId;
-    await this.go(t,'email_code');
-    return this.say(t,`Отправил код на ${T.maskEmail(email)}. Введи 6 цифр сюда. Код действует 10 минут.`,[[f('Отправить код ещё раз','rs'),f('Сменить почту','ce')]]);
+    return this.emailStatus(t,await this.domain.requestEmailCode(t.ctx,{email},this.key(t,'email_code')));
+  }
+  /** Resend targets the current owned challenge; the address is never asked again or taken from a callback. */
+  private async resend(t:Turn) {
+    const status=await this.domain.emailVerification(t.ctx,{});
+    if(status.state!=='challenge'){await this.go(t,'email');return this.say(t,T.texts.askEmail);}
+    try{return this.emailStatus(t,await this.domain.resendEmailCode(t.ctx,{challengeId:status.challenge.challengeId},this.key(t,'email_resend')));}
+    catch(error){if(failureCode(error)==='RATE_LIMITED'||failureCode(error)==='REVISION_CONFLICT')return this.emailStatus(t,await this.domain.emailVerification(t.ctx,{}),'Новый код пока отправить нельзя.');throw error;}
+  }
+  /** Renders server state honestly: «sent» only for state=sent; cooldown and attempts come from the server. */
+  private async emailStatus(t:Turn,status:Status,prefix?:string):Promise<unknown> {
+    if(status.state==='verified'){t.account=await this.domain.account(t.ctx,{});return this.resumeOnboarding(t);}
+    if(status.state==='none'){await this.go(t,'email');return this.say(t,`${prefix?`${prefix}\n\n`:''}${T.texts.askEmail}`);}
+    const c=status.challenge;
+    if(t.dlg.step!=='email_code')await this.go(t,'email_code');
+    const wait=Math.ceil((Date.parse(c.resendAfter)-Date.now())/1000);
+    const resend=wait>0?`Новый код можно запросить через ${wait} с.`:'Можно запросить новый код.';
+    const body:Record<typeof c.state,string>={
+      sending:`Отправляем код на ${c.maskedEmail}… Если письмо придёт, введи 6 цифр сюда.`,
+      sent:`Код отправлен на ${c.maskedEmail}. Введи 6 цифр сюда. Действует до ${new Date(c.expiresAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}.`,
+      delivery_unknown:`Не удалось подтвердить, что письмо на ${c.maskedEmail} ушло. Если оно пришло — введи код; иначе запроси новый.`,
+      failed:`Письмо на ${c.maskedEmail} не отправилось. Запроси код ещё раз или смени адрес.`,
+      expired:'Срок кода истёк. Запроси новый.',
+      locked:'Попытки ввода закончились. Запроси новый код.'
+    };
+    const attempts=c.state==='sent'||c.state==='delivery_unknown'||c.state==='sending'?`\nОсталось попыток: ${c.attemptsRemaining}.`:'';
+    return this.say(t,`${prefix?`${prefix}\n\n`:''}${body[c.state]}${attempts}\n${resend}`,[[f('Отправить код ещё раз','rs'),f('Сменить почту','ce')],[f('Удалить аккаунт','ac','del')]]);
   }
   private async codeInput(t:Turn,code:string) {
     if(!/^\d{6}$/.test(code))return this.say(t,'Код — это 6 цифр из письма. Введи их одним сообщением.',[[f('Отправить код ещё раз','rs'),f('Сменить почту','ce')]]);
-    const challengeId=this.m(t).challengeId;
-    if(!challengeId)return this.say(t,'Бот перезапускался, и этот код нужно запросить заново.',[[f('Отправить код ещё раз','rs')]]);
-    t.account=await this.domain.verifyEmailCode(t.ctx,{challengeId,code},this.key(t,'verify'));
-    delete this.m(t).challengeId;
-    if(!t.account.emailVerified)return this.say(t,'Код не подошёл.',[[f('Отправить код ещё раз','rs')]]);
+    const status=await this.domain.emailVerification(t.ctx,{});
+    if(status.state!=='challenge')return this.emailStatus(t,status);
+    try{
+      const result=await this.domain.verifyEmailCode(t.ctx,{challengeId:status.challenge.challengeId,code},this.key(t,'verify'));
+      t.account=result.account;
+    }catch(error){
+      const code=failureCode(error);
+      if(code==='CODE_INVALID'||code==='CODE_EXPIRED'||code==='REVISION_CONFLICT'||code==='OPERATION_IN_PROGRESS')
+        return this.emailStatus(t,await this.domain.emailVerification(t.ctx,{}),code==='CODE_INVALID'?'Код не подошёл.':code==='CODE_EXPIRED'?'Срок кода истёк.':code==='OPERATION_IN_PROGRESS'?'Письмо ещё отправляется — попробуй через минуту.':'Этот код уже заменён новым.');
+      throw error;
+    }
     await this.say(t,'Почта подтверждена.');
     return this.resumeOnboarding(t);
   }
@@ -479,12 +512,12 @@ export class Flows {
     if(t.dlg.step!=='preview'||!previewId)return this.say(t,T.texts.stale,menuRows());
     const p=await this.domain.preview(t.ctx,{id:previewId});
     const receipt=await this.domain.confirmPreview(t.ctx,{id:p.id,expectedRevision:p.revision,snapshotHash:p.snapshotHash},this.key(t,'confirm'));
-    return this.started(t,p.sessionId,this.domain.startRun(t.ctx,{previewId:p.id,previewRevision:receipt.revision,expectedSessionRevision:p.sessionRevision},this.key(t,'start_run')));
+    return this.started(t,p.sessionId,this.domain.startRun(t.ctx,{previewId:p.id,previewRevision:receipt.revision,snapshotHash:receipt.snapshotHash,expectedSessionRevision:p.sessionRevision},this.key(t,'start_run')));
   }
   private async started(t:Turn,sessionId:string|null,accepted:Promise<{runId:string;resourceId?:string}>) {
     const a=await accepted;
     let position:number|null=null;
-    try{const run=await this.domain.run(t.ctx,{id:a.runId});position=run.status==='pending'?run.queuePosition:null;}catch(error){if(isTransient(error))throw error;}
+    try{const run=await this.domain.run(t.ctx,{id:a.runId});position=run.status==='pending'?run.queuePosition:null;}catch(error){if(escalates(error))throw error;}
     await this.go(t,'waiting_run',{},{sessionId,previewId:null,roleplayId:a.resourceId??t.dlg.roleplayId});
     return this.say(t,T.queued(position));
   }
@@ -642,7 +675,7 @@ export class Flows {
     switch(run.kind){
       case 'analysis':{
         await toMenuStep();
-        const p=await this.domain.preview(t.ctx,{id:run.previewId}).catch(error=>{if(isTransient(error))throw error;return null;});
+        const p=await this.domain.preview(t.ctx,{id:run.previewId}).catch(error=>{if(escalates(error))throw error;return null;});
         return this.say(t,T.analysis(run.output,new Map(p?.fields.map(x=>[x.id,x.label])??[])),this.resultRows(run));
       }
       case 'reply_feedback':case 'before_send':await toMenuStep();return this.say(t,T.draftFeedback(run.output),this.resultRows(run));

@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import type {z} from 'zod';
-import type {ReminderSettings} from '@between/contracts/product';
+import type {EmailVerificationStatus,ReminderSettings} from '@between/contracts/product';
 import {navigate} from '../../app/router';
 import {Modal} from '../../components/Modal';
 import {Button,Loading,Notice,TextField} from '../../components/ui';
@@ -10,6 +10,7 @@ import {useSession} from '../../lib/session';
 import {useAsync} from '../../lib/useAsync';
 
 type Reminders=z.infer<typeof ReminderSettings>;
+type Verification=z.infer<typeof EmailVerificationStatus>;
 const POLICY='web-telegram-2';
 
 function RemindersForm() {
@@ -34,6 +35,40 @@ function RemindersForm() {
       {msg&&<Notice tone={msg.tone}>{msg.text}</Notice>}
       <div className="actions"><Button type="submit" busy={busy}>Сохранить напоминания</Button></div>
     </form>
+  );
+}
+
+const challengeText:Record<string,string>={sending:'Письмо отправляется.',sent:'Код отправлен.',delivery_unknown:'Не удалось подтвердить отправку письма. Если оно пришло — введите код.',failed:'Письмо не отправилось. Запросите код ещё раз.',expired:'Срок кода истёк.',locked:'Попытки ввода закончились.'};
+
+/** Email change on the web: state is read from the server every time, never kept in browser storage. */
+function EmailSection() {
+  const loaded=useAsync(signal=>api('emailVerification',{},{signal}),[]);
+  const {refresh}=useSession();
+  const [status,setStatus]=useState<Verification|null>(null);
+  const [email,setEmail]=useState('');const [code,setCode]=useState('');
+  const [busy,setBusy]=useState<string|null>(null);const [msg,setMsg]=useState<{tone:'success'|'error';text:string}|null>(null);
+  useEffect(()=>{if(loaded.data)setStatus(loaded.data);},[loaded.data]);
+  const reread=async(text?:string,tone:'success'|'error'='error')=>{try{setStatus(await api('emailVerification',{}));}catch{/* keep last known */}if(text)setMsg({tone,text});};
+  const run=async(name:string,work:()=>Promise<unknown>)=>{setBusy(name);setMsg(null);try{await work();}catch(e){await reread(errorText(e));}finally{setBusy(null);}};
+  if(!status)return loaded.loading?<Loading label="Проверяем почту"/>:<Notice tone="error">{errorText(loaded.error)}</Notice>;
+  const c=status.state==='challenge'?status.challenge:null;
+  const wait=c?Math.max(0,Math.ceil((Date.parse(c.resendAfter)-Date.now())/1000)):0;
+  return (
+    <div className="grid-form">
+      {status.state==='verified'&&<p>Почта подтверждена.</p>}
+      {c&&<Notice>{challengeText[c.state]} Адрес: {c.maskedEmail}. Осталось попыток: {c.attemptsRemaining}. {wait?`Новый код — через ${wait} с.`:'Можно запросить новый код.'}</Notice>}
+      {c&&['sent','delivery_unknown','sending'].includes(c.state)&&<form className="row" onSubmit={e=>{e.preventDefault();void run('verify',async()=>{await api('verifyEmailCode',{challengeId:c.challengeId,code},{key:newKey()});setCode('');await refresh();await reread('Почта подтверждена.','success');});}}>
+        <TextField label="Код из письма" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,''))}/>
+        <Button type="submit" busy={busy==='verify'} disabled={code.length!==6}>Подтвердить</Button>
+      </form>}
+      {c&&<div className="actions"><Button variant="secondary" busy={busy==='resend'} disabled={wait>0} onClick={()=>void run('resend',async()=>setStatus(await api('resendEmailCode',{challengeId:c.challengeId},{key:newKey()})))}>Отправить код ещё раз</Button></div>}
+      <form className="row" onSubmit={e=>{e.preventDefault();void run('request',async()=>{setStatus(await api('requestEmailCode',{email:email.trim()},{key:newKey()}));setEmail('');});}}>
+        <TextField label={status.state==='verified'?'Новый адрес почты':'Адрес почты'} type="email" maxLength={254} value={email} onChange={e=>setEmail(e.target.value)}/>
+        <Button type="submit" variant="secondary" busy={busy==='request'} disabled={!email.trim()}>Получить код</Button>
+      </form>
+      <p className="small muted">История остаётся в этом аккаунте; смена адреса не объединяет аккаунты.</p>
+      {msg&&<Notice tone={msg.tone}>{msg.text}</Notice>}
+    </div>
   );
 }
 
@@ -72,10 +107,11 @@ export function SettingsPage() {
       <h1>Настройки</h1>
       {done&&<Notice tone="success">{done}</Notice>}{error&&<Notice tone="error">{error}</Notice>}
       <section className="card"><h2>Аккаунт</h2>
-        <dl className="meta"><dt>Имя</dt><dd>{a.displayName}</dd><dt>Почта</dt><dd>{a.emailVerified?'подтверждена':'не подтверждена'} (сменить можно в боте)</dd><dt>Согласие</dt><dd>{a.consentVersion??'нет'}</dd></dl>
+        <dl className="meta"><dt>Имя</dt><dd>{a.displayName}</dd><dt>Почта</dt><dd>{a.emailVerified?'подтверждена':'не подтверждена'}</dd><dt>Согласие</dt><dd>{a.consentVersion??'нет'}</dd></dl>
         <p className="small muted">Вход — через Telegram-бота. Пароля нет. Данные проходят через Telegram и сервер проекта; модель работает на компьютере команды.</p>
         {a.consentVersion!==POLICY?<Button onClick={()=>void accept()}>Дать согласие (web-telegram-2, черновик)</Button>:<Button variant="secondary" onClick={()=>setDialog('consent')}>Отозвать согласие</Button>}
       </section>
+      <section className="card"><h2>Почта</h2><EmailSection/></section>
       <section className="card"><h2>Напоминания</h2><RemindersForm/></section>
       <section className="card"><h2>Входы на сайт</h2><WebSessions/></section>
       <section className="card"><h2>Удаление</h2>

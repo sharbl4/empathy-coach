@@ -46,7 +46,7 @@ export function PreviewPage({id}:{id:string}) {
     setBusy('send');setError(null);
     try{
       const receipt=await api('confirmPreview',{id:preview.id,expectedRevision:preview.revision,snapshotHash:preview.snapshotHash},{key:keys.current.confirm});
-      const run=await api('startRun',{previewId:preview.id,previewRevision:receipt.revision,expectedSessionRevision:preview.sessionRevision},{key:keys.current.start});
+      const run=await api('startRun',{previewId:preview.id,previewRevision:receipt.revision,snapshotHash:receipt.snapshotHash,expectedSessionRevision:preview.sessionRevision},{key:keys.current.start});
       navigate(`/runs/${run.runId}`,{replace:true});
     }catch(e){setError(errorText(e));setBusy(null);}
   };

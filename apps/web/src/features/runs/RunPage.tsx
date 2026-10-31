@@ -15,7 +15,10 @@ export function RunPage({id}:{id:string}) {
   if(!run)return state.error?<Notice tone="error">{errorText(state.error)}</Notice>:<Loading label="Загружаем результат"/>;
   const retry=async()=>{
     if(run.status!=='failed')return;setBusy(true);setRetryError(null);
-    try{const next=await api('retry',{id:run.id,previewId:run.previewId,previewRevision:run.previewRevision,expectedRevision:run.revision},{key:newKey()});navigate(`/runs/${next.runId}`,{replace:true});}
+    try{
+      // Retry is bound to the confirmed snapshot of this run; a changed preview is reported as PREVIEW_STALE.
+      const preview=await api('preview',{id:run.previewId});
+      const next=await api('retry',{id:run.id,previewId:run.previewId,previewRevision:run.previewRevision,snapshotHash:preview.snapshotHash,expectedRevision:run.revision},{key:newKey()});navigate(`/runs/${next.runId}`,{replace:true});}
     catch(e){setRetryError(errorText(e));setBusy(false);}
   };
   return (

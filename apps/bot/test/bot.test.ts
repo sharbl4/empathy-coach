@@ -73,8 +73,8 @@ test('registration: greeting, consent web-telegram-2, gated menu, wrong code, ve
   await h.message('/history');assert.match(h.lastText(),/Перед началом/);
   await h.click('Принимаю, продолжить');assert.equal(h.account().consentVersion,'web-telegram-2');
   await h.message('not-an-email');assert.match(h.lastText(),/не похоже на адрес/);
-  await h.message('me@example.com');assert.match(h.lastText(),/m\*\*\*@example\.com/);
-  await h.message(h.domain.lastCode==='000000'?'111111':'000000');assert.match(h.lastText(),/Код не подошёл/);
+  await h.message('me@example.com');assert.match(h.lastText(),/Код отправлен на me\*\*\*@example\.com/);assert.match(h.lastText(),/Осталось попыток: 5/);
+  await h.message(h.domain.lastCode==='000000'?'111111':'000000');assert.match(h.lastText(),/Код не подошёл\.[\s\S]*Осталось попыток: 4/);
   await h.message(h.domain.lastCode);
   assert.ok(h.messages().some(m=>m.text==='Почта подтверждена.'));assert.match(h.lastText(),/Главное меню/);
   assert.ok(h.account().onboardingCompletedAt);
@@ -141,15 +141,67 @@ test('duplicates: redelivered update and double click create one preview confirm
   assert.match(h.lastText(),/Этот шаг уже завершён/);
 });
 
-test('uncertain outcome is never acknowledged: same intent retried, one run, user told once',async()=>{
+test('known temporary failure: durable retry_wait with the same intent, one run, user told once, no ack until done',async()=>{
   const h=new Harness();await h.register();await understandToPreview(h);
   const send=h.button('Отправить в модель');
-  h.domain.transient.set('startRun',4);
-  for(let i=0;i<4;i++)assert.equal(await h.callback(send,{updateId:8888}),false);
-  assert.equal(h.domain.receipts.get('8888')!.status,'processing');
-  assert.equal(h.messages().filter(m=>/Временная ошибка сервера/.test(m.text??'')).length,1);
-  assert.equal(await h.callback(send,{updateId:8888}),true);
+  h.domain.transient.set('startRun',1);
+  const first=await h.callback(send,{updateId:8888});
+  assert.equal(first.done,false);
+  assert.equal(h.domain.receipts.get('8888')!.status,'retry_wait');
+  assert.match(h.lastText(),/Временная ошибка сервера/);
+  assert.equal((await h.callback(send,{updateId:8888})).done,false,'not due yet: not processed again');
+  h.domain.clockSkewMs=5000;
+  assert.equal((await h.callback(send,{updateId:8888})).done,true);
   assert.equal(h.domain.runs.size,1);assert.equal(h.domain.receipts.get('8888')!.status,'completed');
+  assert.equal(h.messages().filter(m=>/Временная ошибка сервера/.test(m.text??'')).length,1);
+});
+
+test('retry budget is 3 attempts in the DB; then failed stays failed after ack, user told honestly',async()=>{
+  const h=new Harness();await h.register();
+  h.domain.transient.set('dialogue',3);
+  for(let i=0;i<2;i++){assert.equal((await h.message('/menu',{updateId:9001})).done,false);h.domain.clockSkewMs+=5000;}
+  assert.equal((await h.message('/menu',{updateId:9001})).done,true);
+  const r=h.domain.receipts.get('9001')!;assert.equal(r.status,'failed');assert.equal(r.attempts,3);
+  assert.match(h.lastText(),/Не получилось выполнить это действие/);
+  // A restarted transport claims the same update: still failed, only acknowledged, never re-processed as success.
+  const restarted=new Harness(h.domain);assert.equal((await restarted.message('/menu',{updateId:9001})).done,true);
+  assert.equal(h.domain.receipts.get('9001')!.status,'failed');assert.equal(restarted.messages().length,0);
+});
+
+test('unknown error is terminal at once (INTERNAL_ERROR, no retry, no private detail to the user)',async()=>{
+  const h=new Harness();await h.register();
+  h.domain.unknown.set('dialogue',1);
+  assert.equal((await h.message('/menu',{updateId:9100})).done,true);
+  const r=h.domain.receipts.get('9100')!;
+  assert.equal(r.status,'failed');assert.equal(r.attempts,1);assert.equal(r.failure?.code,'INTERNAL_ERROR');
+  assert.ok(!h.messages().some(m=>/unexpected bug|private detail/.test(m.text??'')));
+});
+
+test('email: state survives a restart without process memory; resend uses the current challenge; honest failed delivery',async()=>{
+  const h=new Harness();
+  await h.message('/start');await h.click('Принимаю, продолжить');await h.message('me@example.com');
+  const restarted=new Harness(h.domain);
+  await restarted.message('/start');
+  assert.match(restarted.lastText(),/Код отправлен на me\*\*\*@example\.com/);
+  h.domain.clockSkewMs=61000;
+  const before=h.domain.lastCode;
+  await restarted.click('Отправить код ещё раз');
+  assert.notEqual(h.domain.lastCode,before,'new code issued');assert.ok(!restarted.messages().some(m=>/Напиши адрес/.test(m.text??'')),'address not asked again');
+  await restarted.message(before);assert.match(restarted.lastText(),/Этот код уже заменён|Код не подошёл/);
+  h.domain.deliveryFailsFor.add('me@example.com');
+  await restarted.message('/start');assert.match(restarted.lastText(),/не отправилось/);assert.doesNotMatch(restarted.lastText(),/Код отправлен/);
+  h.domain.deliveryFailsFor.clear();
+  await restarted.message(h.domain.lastCode);
+  assert.ok(restarted.messages().some(m=>m.text==='Почта подтверждена.'));
+});
+
+test('email resend before cooldown shows the server cooldown instead of claiming a new code',async()=>{
+  const h=new Harness();
+  await h.message('/start');await h.click('Принимаю, продолжить');await h.message('me@example.com');
+  const code=h.domain.lastCode;
+  await h.click('Отправить код ещё раз');
+  assert.match(h.lastText(),/Новый код пока отправить нельзя/);assert.match(h.lastText(),/через \d+ с/);
+  assert.equal(h.domain.lastCode,code);
 });
 
 test('ownership: forged callbacks with another account ids reveal nothing',async()=>{
@@ -349,6 +401,16 @@ test('delivery: blocked user → CHAT_UNAVAILABLE in the domain outbox, no endle
   h.failNext=m=>m==='sendMessage'?{ok:false,error_code:403,description:'Forbidden: bot was blocked by the user'}:null;
   await h.deliver();assert.deepEqual([...h.domain.deliveries.values()][0]!.failures,['CHAT_UNAVAILABLE']);
   const before=h.messages().length;await h.deliver();assert.equal(h.messages().length,before);
+});
+
+test('retry of a failed run passes the confirmed snapshot hash and revision of its preview',async()=>{
+  const h=new Harness();await h.register();await understandToPreview(h);await h.click('Отправить в модель');
+  const failed=h.domain.pending()!;h.domain.failRun(failed.id);await h.deliver();
+  const calls:unknown[]=[];const original=h.domain.retry.bind(h.domain);
+  h.domain.retry=async(ctx,input,key)=>{calls.push(input);return original(ctx,input,key);};
+  await h.click('Повторить');assert.match(h.lastText(),/Запрос принят/);
+  const p=h.domain.previews.get(failed.previewId)!.preview;
+  assert.deepEqual(calls,[{id:failed.id,previewId:p.id,previewRevision:p.revision,snapshotHash:p.snapshotHash,expectedRevision:failed.revision}]);
 });
 
 test('telegram client: bounded 429 wait; no token or URL in errors and logs',async()=>{

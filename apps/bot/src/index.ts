@@ -49,7 +49,7 @@ class Transport implements TelegramTransport {
     if(this.running)await this.running;else this.resolveFinished();
   }
 
-  health() {return {polling:this.poller?.polling??false};}
+  health() {return {polling:(this.poller?.polling??false)&&!this.poller?.degraded};}
 }
 
 /** Invalid token (401), deleted bot (404) or a second poller (409) cannot recover by retrying. */

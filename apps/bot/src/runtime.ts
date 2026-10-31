@@ -1,8 +1,8 @@
-import type {PrivateTelegramIdentity,ProductFacade} from '@between/contracts/product';
-import {decode} from './callbacks.js';
-import {Flows,type Turn,failureCode,isTransient} from './flows.js';
+import {normalizeDomainError,type DomainFailure,type PrivateTelegramIdentity,type ProductFacade,type UserContext} from '@between/contracts/product';
+import {decode,intentKey} from './callbacks.js';
+import {Flows,type Turn,failureCode} from './flows.js';
 import {classify} from './identity.js';
-import {type TelegramApi,type TgUpdate,TelegramError,isRateLimited,isUnreachable} from './telegram.js';
+import {type TelegramApi,type TgUpdate,TelegramError,TelegramUnavailable,isRateLimited,isUnreachable} from './telegram.js';
 import {texts} from './text.js';
 import {send} from './ui.js';
 
@@ -13,14 +13,28 @@ const sleep=(ms:number,signal?:AbortSignal)=>new Promise<void>(resolve=>{const t
 const MAX_BACKOFF=60000;
 
 export interface PollerOptions {timeoutSeconds:number;backoffMs:number;fatal?:(error:unknown)=>boolean}
+/** Outcome of one update: acknowledged, or wait (retry_wait / unrecordable failure) before polling again. */
+export type Handled={done:true}|{done:false;waitMs:number};
 
 /**
- * Single getUpdates poller. Offset comes from the domain; an update is acknowledged only after a definite outcome.
- * An uncertain (transient) outcome is never acknowledged: the same update is retried with backoff under the same intent.
+ * Vetted transport classification: only known temporary Telegram conditions become retryable codes.
+ * Everything else goes through the shared normalizer (unknown → INTERNAL_ERROR, terminal).
+ */
+function updateFailure(error:unknown,requestId:string):DomainFailure {
+  if(error instanceof TelegramUnavailable)return {code:'DEPENDENCY_UNAVAILABLE',requestId};
+  if(isRateLimited(error))return {code:'RATE_LIMITED',requestId,retryAfterSeconds:Math.min(300,(error as TelegramError).retryAfter??5)};
+  if(error instanceof TelegramError)return {code:'INTERNAL_ERROR',requestId};
+  return normalizeDomainError(error,requestId);
+}
+
+/**
+ * Single getUpdates poller. Offset comes from the domain. Ack only after a known completed operation or a
+ * persisted terminal failure (recordUpdateFailure); the attempt budget lives in the DB (UpdateReceiptV2).
  */
 export class Poller {
   polling=false;
-  private notified=new Set<string>();
+  /** Set when a failure could not be recorded durably: surfaced as unhealthy through health().polling. */
+  degraded=false;
   constructor(private tg:TelegramApi,private domain:ProductFacade,private flows:Flows,private options:PollerOptions={timeoutSeconds:25,backoffMs:2000}) {}
 
   async run(signal:AbortSignal) {
@@ -30,13 +44,12 @@ export class Poller {
         try{
           const {nextOffset}=await this.domain.updateCursor();
           const updates=await this.tg.getUpdates(nextOffset,this.options.timeoutSeconds,signal);
-          this.polling=true;
-          let blocked=false;
+          this.polling=true;backoff=this.options.backoffMs;
           for(const update of updates){
             if(signal.aborted)break;
-            if(!await this.handle(update)){blocked=true;break;}
+            const handled=await this.handle(update);
+            if(!handled.done){await sleep(Math.min(handled.waitMs,MAX_BACKOFF),signal);break;}
           }
-          if(blocked){await sleep(backoff,signal);backoff=Math.min(backoff*2,MAX_BACKOFF);}else backoff=this.options.backoffMs;
         }catch(error){
           if(signal.aborted)break;
           this.polling=false;logError('poll',error);
@@ -47,33 +60,48 @@ export class Poller {
     }finally{this.polling=false;}
   }
 
-  /** true = acknowledged (definite outcome); false = uncertain, not acknowledged, retried later. */
-  async handle(update:TgUpdate):Promise<boolean> {
+  async handle(update:TgUpdate):Promise<Handled> {
     const updateId=String(update.update_id),c=classify(update);
-    try{
+    if(c.kind!=='private'){
+      // Rejected group/channel/inline updates: no account, no content stored; just advance the offset.
       if(c.kind==='callback_rejected')await this.tg.answerCallbackQuery(c.callbackId,texts.groupOnly).catch(()=>{});
       if(c.kind==='group_command')await this.tg.sendMessage(c.chatId,texts.groupOnly).catch(()=>{});
-      if(c.kind==='private')await this.process(update,c.identity,updateId);
+      return this.ack(updateId);
+    }
+    if(update.callback_query)await this.tg.answerCallbackQuery(update.callback_query.id).catch(()=>{});
+    let ctx:UserContext,receipt;
+    try{ctx=await this.domain.resolveUser(c.identity);receipt=await this.domain.claimUpdate(ctx,updateId);}
+    catch(error){logError('claim',error);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+    if(receipt.status==='completed'||receipt.status==='failed')return this.ack(updateId);
+    if(receipt.status==='retry_wait')return {done:false,waitMs:Math.max(1000,Date.parse(receipt.nextAttemptAt??'')-Date.now()||this.options.backoffMs)};
+    try{
+      await this.process(update,ctx,c.identity,receipt.intentKey);
     }catch(error){
       logError('update',error);
-      // Definite: the user blocked the bot or Telegram rejected the request. Otherwise the outcome is unknown.
-      const definite=isUnreachable(error)||(error instanceof TelegramError&&error.status===400)||(!isTransient(error)&&!(error instanceof TelegramError));
-      if(!definite){
-        if(c.kind==='private'&&!this.notified.has(updateId)){this.notified.add(updateId);await this.tg.sendMessage(c.identity.privateChatId,'Временная ошибка сервера. Я повторю действие сам — нажимать ещё раз не нужно.').catch(()=>{});}
-        return false;
+      if(isUnreachable(error))return this.ack(updateId); // the user blocked the bot: nothing more to deliver
+      const failure=updateFailure(error,`bot-${receipt.intentKey}`);
+      let recorded;
+      try{recorded=await this.domain.recordUpdateFailure(ctx,{updateId,failure},intentKey(receipt.intentKey,'failure',receipt.attempts));}
+      catch(recordError){logError('record-failure',recordError);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+      if(recorded.status==='retry_wait'){
+        if(recorded.attempts===1)await this.tg.sendMessage(c.identity.privateChatId,'Временная ошибка сервера. Я повторю действие сам — нажимать ещё раз не нужно.').catch(()=>{});
+        return {done:false,waitMs:Math.max(1000,Date.parse(recorded.nextAttemptAt??'')-Date.now()||this.options.backoffMs)};
       }
+      // Terminal failure is persisted: tell the user honestly once, then ack (the receipt stays failed).
+      await this.tg.sendMessage(c.identity.privateChatId,texts.failed).catch(()=>{});
+      return this.ack(updateId);
     }
-    try{await this.domain.acknowledgeUpdate(updateId);this.notified.delete(updateId);return true;}
-    catch(error){logError('ack',error);return false;}
+    return this.ack(updateId);
   }
 
-  private async process(update:TgUpdate,identity:PrivateTelegramIdentity,updateId:string) {
-    if(update.callback_query)await this.tg.answerCallbackQuery(update.callback_query.id).catch(()=>{});
-    const ctx=await this.domain.resolveUser(identity);
-    const receipt=await this.domain.claimUpdate(ctx,updateId);
-    if(receipt.status==='completed')return;
+  private async ack(updateId:string):Promise<Handled> {
+    try{await this.domain.acknowledgeUpdate(updateId);this.degraded=false;return {done:true};}
+    catch(error){logError('ack',error);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+  }
+
+  private async process(update:TgUpdate,ctx:UserContext,identity:PrivateTelegramIdentity,intent:string) {
     const [account,dlg]=await Promise.all([this.domain.account(ctx,{}),this.domain.dialogue(ctx,{})]);
-    const t:Turn={tg:this.tg,ctx,chat:identity.privateChatId,account,dlg,intent:receipt.intentKey,seq:0};
+    const t:Turn={tg:this.tg,ctx,chat:identity.privateChatId,account,dlg,intent,seq:0};
     const text=update.message?.text;
     const command=text?.match(/^\/([a-z_]+)(?:@\w+)?(?:\s|$)/i)?.[1]?.toLowerCase();
     if(command)return this.flows.command(t,COMMANDS.has(command)?command:'unknown');

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { Id, Session, SessionDetail, SessionPage, Me, Progress, type RequestFor, type SessionInput } from '@between/contracts';
 import { HttpError, notFound } from '../errors.js';
+import {DomainSessionDetail} from '@between/contracts/domain';
 
 type Connection = Pool | PoolClient;
 export async function transaction<T>(pool:Pool, work:(client:PoolClient)=>Promise<T>):Promise<T> {
@@ -17,6 +18,7 @@ function session(row:Record<string,unknown>) {
 }
 export class Storage {
   constructor(readonly pool:Pool) {}
+  private within<T>(client:PoolClient|undefined,work:(client:PoolClient)=>Promise<T>){return client?work(client):transaction(this.pool,work);}
   async profile(userId:string, patch?:RequestFor<'updateMe'>) {
     const result=await this.pool.query(`INSERT INTO app.profiles(id,display_name,onboarding_completed_at)
       VALUES($1,COALESCE($2,'Пользователь'),CASE WHEN $3 THEN now() END)
@@ -27,8 +29,8 @@ export class Storage {
     return Me.parse({id:row.id,displayName:row.display_name,onboardingCompletedAt:row.onboarding_completed_at?.toISOString()??null,
       aiMode:'gigachat',capabilities:{analysis:true,reply:true,exercise:true,roleplay:true}});
   }
-  async create(userId:string,input:SessionInput) {
-    return transaction(this.pool,async client=>{
+  async create(userId:string,input:SessionInput,existing?:PoolClient) {
+    return this.within(existing,async client=>{
       await client.query('INSERT INTO app.profiles(id) VALUES($1) ON CONFLICT DO NOTHING',[userId]);
       // Profile row is also the per-owner lock for bulk deletion and AI completion.
       await client.query('SELECT id FROM app.profiles WHERE id=$1 FOR UPDATE',[userId]);
@@ -37,7 +39,7 @@ export class Storage {
       return session(result.rows[0]);
     });
   }
-  async list(userId:string,query:{cursor?:string;limit:number;q?:string}) {
+  async list(userId:string,query:{cursor?:string;limit:number;q?:string},existing?:PoolClient) {
     let timestamp:string|null=null,id:string|null=null;
     if(query.cursor) {
       try {
@@ -46,7 +48,7 @@ export class Storage {
         timestamp=decoded[0]; id=Id.parse(decoded[1]);
       } catch { throw new HttpError(400,'VALIDATION_ERROR','Некорректный cursor'); }
     }
-    const result=await this.pool.query(`SELECT ${columns},to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
+    const result=await (existing??this.pool).query(`SELECT ${columns},to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_time
       FROM app.sessions WHERE user_id=$1 AND ($2::timestamptz IS NULL OR (updated_at,id)<($2::timestamptz,$3::uuid))
       AND ($4::text IS NULL OR strpos(lower(title),lower($4))>0)
       ORDER BY updated_at DESC,id DESC LIMIT $5`,[userId,timestamp,id,query.q??null,query.limit+1]);
@@ -59,9 +61,10 @@ export class Storage {
     if(!result.rows[0]) throw notFound();
     return session(result.rows[0]);
   }
-  async detail(userId:string,id:string) {
-    return transaction(this.pool,async client=>{
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+  async detail(userId:string,id:string,existing?:PoolClient) {return SessionDetail.parse(await this.domainDetail(userId,id,existing));}
+  async domainDetail(userId:string,id:string,existing?:PoolClient) {
+    return this.within(existing,async client=>{
+      if(!existing)await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       const value=await this.owned(client,userId,id);
       const runs=await client.query(`SELECT id,session_id AS "sessionId",revision,kind,status,output,error_code AS "errorCode",created_at AS "createdAt",updated_at AS "updatedAt"
         FROM app.ai_runs WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at DESC,id DESC LIMIT 1000`,[id,userId,value.revision]);
@@ -69,14 +72,14 @@ export class Storage {
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id',m.id,'sequence',m.sequence,'role',m.role,'content',m.content) ORDER BY m.sequence)
           FROM app.roleplay_messages m WHERE m.roleplay_id=r.id),'[]'::jsonb) AS messages
         FROM app.roleplays r WHERE session_id=$1 AND user_id=$2 AND revision=$3 ORDER BY created_at DESC,id DESC LIMIT 100`,[id,userId,value.revision]);
-      return SessionDetail.parse({...value,runs:runs.rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString()})),roleplays:roles.rows});
+      return DomainSessionDetail.parse({...value,runs:runs.rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString()})),roleplays:roles.rows});
     });
   }
   async assertIdle(client:PoolClient,id:string) {
     if((await client.query("SELECT 1 FROM app.ai_runs WHERE session_id=$1 AND status='pending'",[id])).rowCount) throw new HttpError(409,'OPERATION_IN_PROGRESS','Дождитесь завершения операции');
   }
-  async update(userId:string,id:string,input:RequestFor<'updateSession'>) {
-    return transaction(this.pool,async client=>{
+  async update(userId:string,id:string,input:RequestFor<'updateSession'>,existing?:PoolClient) {
+    return this.within(existing,async client=>{
       const current=await this.owned(client,userId,id,true);
       if(current.revision!==input.expectedRevision) throw new HttpError(409,'REVISION_CONFLICT','Ситуация изменена в другой вкладке');
       await this.assertIdle(client,id);
@@ -86,14 +89,14 @@ export class Storage {
       return session(result.rows[0]);
     });
   }
-  async remove(userId:string,id:string) {
-    await transaction(this.pool,async client=>{
+  async remove(userId:string,id:string,existing?:PoolClient) {
+    await this.within(existing,async client=>{
       await this.owned(client,userId,id,true); await this.assertIdle(client,id);
       await client.query('DELETE FROM app.sessions WHERE id=$1 AND user_id=$2',[id,userId]);
     });
   }
-  async clear(userId:string,onDeleted?:(runIds:string[])=>void) {
-    const ids=await transaction(this.pool,async client=>{
+  async clear(userId:string,onDeleted?:(runIds:string[])=>void,existing?:PoolClient) {
+    const ids=await this.within(existing,async client=>{
       await client.query('SELECT id FROM app.profiles WHERE id=$1 FOR UPDATE',[userId]);
       const runs=await client.query<{id:string}>('SELECT id FROM app.ai_runs WHERE user_id=$1',[userId]);
       await client.query('DELETE FROM app.sessions WHERE user_id=$1',[userId]);
@@ -101,9 +104,9 @@ export class Storage {
     });
     onDeleted?.(ids);
   }
-  async progress(userId:string) {
-    return transaction(this.pool,async client=>{
-      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+  async progress(userId:string,existing?:PoolClient) {
+    return this.within(existing,async client=>{
+      if(!existing)await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       const counts=(await client.query(`SELECT count(DISTINCT session_id) FILTER(WHERE kind='analysis')::int AS "analyzedSessions",
         count(*) FILTER(WHERE kind='exercise')::int AS "completedExercises",count(*) FILTER(WHERE kind='roleplay')::int AS "completedRoleplays"
         FROM app.practice_events WHERE user_id=$1`,[userId])).rows[0];

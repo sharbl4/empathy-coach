@@ -19,6 +19,9 @@ export async function startBrowserTestServer(options:{origin:string;port:number;
       const id=String(99000101+i),ctx=await domain.resolveUser({telegramUserId:id,privateChatId:id,updateId:String(900001+i)});contexts[name]=ctx;
       await domain.acceptConsent(ctx,{accepted:true,policyVersion:'web-telegram-2'},randomUUID());const status=await domain.emailVerification(ctx,{});
       if(status.state!=='verified'){const email=`browser-${name.toLowerCase()}@example.invalid`,challenge=await domain.requestEmailCode(ctx,{email},randomUUID());if(challenge.state!=='challenge')throw new Error('Expected test challenge');const code=codes.get(email);if(!code)throw new Error('Expected test SMTP capture');await domain.verifyEmailCode(ctx,{challengeId:challenge.challenge.challengeId,code},randomUUID());}
+      // Suite setup only: explicitly discard the synthetic user's previous suite draft.
+      // Login itself never resets dialogue; reload/login assertions still exercise persistence.
+      const priorDialogue=await domain.dialogue(ctx,{});await domain.resetDialogue(ctx,{expectedRevision:priorDialogue.revision,confirmation:'DISCARD_UNFINISHED_ASSESSMENT'},randomUUID());
       if(name==='A'&&!(await domain.sessions(ctx,{limit:50})).items.some(s=>s.input.title==='Тестовая история участника A'))await domain.createSession(ctx,{mode:'understand',title:'Тестовая история участника A',relationship:'Коллега',context:'Синтетический browser test',contextType:'colleague',goal:'clarify',message:'Завтра?',guess:{emotions:[],quotes:[],unsure:true}},randomUUID());
     }
     // Explicit fixture clock: repeated independent browser scenarios preserve the real

@@ -1,0 +1,14 @@
+import type {z} from 'zod';
+import type {ContextType,Difficulty,Goal,LearningMode,Skill} from '@between/contracts/product';
+type I<S extends z.ZodType>=z.infer<S>;
+export const goalLabels:Record<I<typeof Goal>,string>={support:'Поддержать',clarify:'Уточнить',reconcile:'Помириться',boundary:'Обозначить границу'};
+export const contextLabels:Record<I<typeof ContextType>,string>={close:'Близкие',colleague:'Коллеги',teacher:'Преподаватель',client:'Клиент'};
+export const difficultyLabels:Record<I<typeof Difficulty>,string>={calm:'Спокойный',hurt:'Обиженный',irritated:'Раздражённый'};
+export const modeLabels:Record<I<typeof LearningMode>,string>={understand:'Понять сообщение',say_direct:'Сказать прямо',before_send:'До отправки',thread:'Ветка переписки'};
+export const skillLabels:Record<I<typeof Skill>,string>={clarification:'Уточнение',acknowledgment:'Признание переживания',request:'Ясная просьба',boundary:'Граница'};
+export const basisLabels={text:'есть текстовые основания',context:'зависит от контекста',insufficient:'данных недостаточно'} as const;
+export const toneLabels={good:'удачно',caution:'может прозвучать двояко',risky:'стоит пересмотреть'} as const;
+export const toneMarks={good:'🟢',caution:'🟡',risky:'🟠'} as const;
+export const kindLabels:Record<string,string>={analysis:'Разбор',say_direct:'Сказать прямо',before_send:'До отправки',reply_feedback:'Отзыв на черновик',reply_examples:'Примеры ответа',clarify:'Уточняющие вопросы',exercise:'Упражнение',exercise_feedback:'Отзыв на попытку',roleplay_start:'Начало тренировки',roleplay_turn:'Ход тренировки',roleplay_feedback:'Итог тренировки',card_feedback:'Отзыв по карточке'};
+export const runFailure:Record<string,string>={RUN_INTERRUPTED:'Обработка прервалась из-за перезапуска сервера.',MODEL_TIMEOUT:'Модель не ответила вовремя.',MODEL_UNAVAILABLE:'Модель сейчас недоступна (компьютер с моделью выключен или перегружен).',MODEL_INVALID_OUTPUT:'Модель вернула ответ в неверном формате — показывать его нельзя.',MODEL_REFUSED:'Модель отказалась отвечать.',PREVIEW_STALE:'Предпросмотр устарел.',INPUT_TOO_LARGE:'Текст не поместился в контекст модели.',CONFIGURATION_ERROR:'Сервис настроен не полностью.'};
+export const formatDate=(iso:string)=>new Date(iso).toLocaleString('ru-RU',{dateStyle:'medium',timeStyle:'short'});

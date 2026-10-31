@@ -19,6 +19,18 @@
     "./domain-fixtures": {
       "types": "./dist/domain-fixtures.d.ts",
       "default": "./dist/domain-fixtures.js"
+    },
+    "./product": {
+      "types": "./dist/product.d.ts",
+      "default": "./dist/product.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./product-fixtures": {
+      "types": "./dist/product-fixtures.d.ts",
+      "default": "./dist/product-fixtures.js"
     }
   },
   "scripts": {

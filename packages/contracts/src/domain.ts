@@ -13,7 +13,7 @@ export type PrivateTelegramIdentity=z.infer<typeof PrivateTelegramIdentity>;
 export type TelegramUserId=z.infer<typeof TelegramUserId>;
 /** Runtime issuer/WeakSet checks MUST be implemented by createDomain, not just this TS brand. */
 declare const userContextBrand:unique symbol;
-export type UserContext=Readonly<{accountId:string;telegramUserId:TelegramUserId;[userContextBrand]:true}>;
+export type UserContext=Readonly<{accountId:string;telegramUserId:TelegramUserId;transport:'telegram'|'web';[userContextBrand]:true}>;
 export const ConsentAcceptance=z.strictObject({policyVersion:z.literal('telegram-1'),accepted:z.literal(true)});
 export const Account=z.strictObject({id:Id,telegramUserId:TelegramUserId,displayName:text(100),emailVerified:z.boolean(),consentVersion:z.string().max(100).nullable(),onboardingCompletedAt:z.iso.datetime().nullable()});
 export const AccountPatch=z.strictObject({displayName:text(100).optional(),onboardingCompleted:z.literal(true).optional()}).refine(value=>Object.keys(value).length>0);

@@ -1,7 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {Preview,MODEL_PROMPT_VERSION,RunV2,type OperationInput,type UserContext} from '@between/contracts/product';
 import type {PoolClient} from 'pg';
-import {maskText} from './redaction.js';
+import {captureText,uniqueMasks,type Mask} from './redaction.js';
 import {Sessions} from './sessions.js';
 import {Store,canonical,fail} from './core.js';
 import {budget,type Model,type Snapshot} from './model.js';
@@ -19,8 +19,8 @@ export class Previews {
     }
   }
   create(ctx:UserContext,input:OperationInput<'createPreview'>,key:string){return this.store.write(ctx,'createPreview',input,key,async(c,row,source)=>{
-    const fields:Snapshot['fields']=[],turns:Snapshot['turns']=[],dependencies:Snapshot['dependencies']=[];let redactionCount=0;
-    const add=(label:string,value:string,editable=true)=>{const masked=maskText(value);if(masked!==value)redactionCount++;if(masked.length>12000||fields.length>=100)fail('INPUT_TOO_LARGE');const field={id:randomUUID(),label,value:masked,editable};fields.push(field);return field.id;};
+    const fields:Snapshot['fields']=[],turns:Snapshot['turns']=[],dependencies:Snapshot['dependencies']=[],redactions:Record<string,Mask[]>={};let known:Record<string,Mask[]>={};
+    const add=(label:string,value:string,editable=true)=>{const masked=captureText(value,this.store.secret,row.id,known[label]);if(masked.value.length>12000||fields.length>=100)fail('INPUT_TOO_LARGE');const field={id:randomUUID(),label,value:masked.value,editable};fields.push(field);redactions[field.id]=masked.masks;return field.id;};
     const flatten=(value:unknown,path='')=>{if(Array.isArray(value))value.forEach((item,i)=>flatten(item,`${path}.${i}`));else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value)){if(k!=='id')flatten(v,path?`${path}.${k}`:k);}else add(path,String(value),!/(^|\.)(mode|contextType|goal|speaker|unsure)$/.test(path));};
     let sessionId:string|null=null,sessionRevision:number|null=null;
     const metadata:Record<string,unknown>={kind:source.kind};
@@ -29,7 +29,7 @@ export class Previews {
       let role:Awaited<ReturnType<Sessions['role']>>|undefined;
       if('roleplayId' in source){role=await this.sessions.role(c,row.id,source.roleplayId,source.expectedRevision);if(role.value.status!=='active')fail('OPERATION_IN_PROGRESS');if(source.kind==='roleplay_feedback'&&role.value.turnCount<1)fail('VALIDATION_ERROR');if(source.kind==='roleplay_turn'&&role.value.turnCount>=3)fail('OPERATION_IN_PROGRESS');metadata.roleplayId=source.roleplayId;dependencies.push({kind:'roleplay',id:role.value.id,revision:role.value.revision});sessionId=role.row.session_id;}
       else sessionId=source.sessionId;
-      const session=await this.sessions.owned(c,row.id,sessionId!,role?undefined:source.expectedRevision);sessionRevision=session.revision;dependencies.push({kind:'session',id:session.id,revision:session.revision});flatten(session.input,'session');
+      const session=await this.sessions.owned(c,row.id,sessionId!,role?undefined:source.expectedRevision);sessionRevision=session.revision;dependencies.push({kind:'session',id:session.id,revision:session.revision});const stored=(await c.query('SELECT redactions FROM app.product_sessions WHERE id=$1 AND user_id=$2',[session.id,row.id])).rows[0].redactions;known=Object.fromEntries(Object.entries(stored).map(([label,masks])=>['session.'+label,masks])) as Record<string,Mask[]>;flatten(session.input,'session');
       if(session.input.mode==='thread')for(const [i,turn] of session.input.turns.entries()){const field=fields.find(f=>f.label===`session.turns.${i}.text`)!;turns.push({fieldId:field.id,speaker:turn.speaker,order:turns.length});}
       if(['reply_feedback','reply_examples','exercise','exercise_feedback','roleplay_start'].includes(source.kind)){
         const result=(await c.query("SELECT id,value FROM app.product_runs WHERE user_id=$1 AND session_id=$2 AND value->>'kind'='analysis' AND (value->>'revision')::int=$3 AND value->>'status'='succeeded' ORDER BY created_at DESC LIMIT 1",[row.id,session.id,session.revision])).rows[0];if(!result)fail('OPERATION_IN_PROGRESS');dependencies.push({kind:'run',id:result.id,revision:session.revision});
@@ -44,16 +44,16 @@ export class Previews {
       if(source.kind==='roleplay_start'){metadata.difficulty=source.difficulty;add('difficulty',source.difficulty,false);}
       if(role){add('difficulty',role.value.difficulty,false);for(const m of role.value.messages){const fieldId=add(`role.${m.sequence}.${m.role}`,m.content,false);if(turns.length>=20)fail('INPUT_TOO_LARGE');turns.push({fieldId,speaker:m.role==='user'?'self':'other',order:turns.length});}if(source.kind==='roleplay_turn'){metadata.turnCount=role.value.turnCount+1;add('nextTurn',String(role.value.turnCount+1),false);const fieldId=add('content',source.content);if(turns.length>=20)fail('INPUT_TOO_LARGE');turns.push({fieldId,speaker:'self',order:turns.length});}}
     }
-    const info=await this.provider.describe(source.kind);
+    metadata.redactions=redactions;const redactionCount=uniqueMasks(redactions),info=await this.provider.describe(source.kind);
     let value=Preview.parse({id:randomUUID(),revision:1,kind:source.kind,sessionId,sessionRevision,dependencies,fields,turns,redactionCount,budget:budget(source.kind,fields,turns,info),modelRevision:this.model,promptVersion:MODEL_PROMPT_VERSION,templateHash:info.hash,snapshotHash:'0'.repeat(64),confirmedAt:null,safety:fields.some(f=>/суицид|самоубий|убью себя|self.harm/i.test(f.value))?'support':'none'});value={...value,snapshotHash:this.hash(value)};
     await c.query('INSERT INTO app.product_previews(id,user_id,session_id,value,source,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[value.id,row.id,sessionId,value,metadata,new Date(this.store.now()),new Date(this.store.now()+3600000)]);return {value};
   },true);}
   async edit(ctx:UserContext,input:OperationInput<'editPreview'>,key:string){await this.sessions.dialogues.ensure(ctx);return this.store.write(ctx,'editPreview',input,key,async(c,row,request)=>{
-    const {value:p}=await this.owned(c,row.id,request.id);if(p.revision!==request.expectedRevision)fail('REVISION_CONFLICT');const shown=await this.sessions.dialogues.shown(c,row.id,p);if(shown.kind==='preview_field'&&request.edits.some(e=>e.fieldId!==shown.fieldId))fail('VALIDATION_ERROR');await this.dependencies(c,row.id,p);if(new Set(request.edits.map(e=>e.fieldId)).size!==request.edits.length)fail('VALIDATION_ERROR');
-    const fields=p.fields.map(f=>({...f}));let redactions=p.redactionCount;for(const edit of request.edits){const f=fields.find(x=>x.id===edit.fieldId);if(!f||!f.editable)fail('VALIDATION_ERROR');const value=maskText(edit.value);if(value!==edit.value)redactions++;f.value=value;}
+    const {row:db,value:p}=await this.owned(c,row.id,request.id);if(p.revision!==request.expectedRevision)fail('REVISION_CONFLICT');const shown=await this.sessions.dialogues.shown(c,row.id,p);if(shown.kind==='preview_field'&&request.edits.some(e=>e.fieldId!==shown.fieldId))fail('VALIDATION_ERROR');await this.dependencies(c,row.id,p);if(new Set(request.edits.map(e=>e.fieldId)).size!==request.edits.length)fail('VALIDATION_ERROR');
+    const fields=p.fields.map(f=>({...f})),masks:Record<string,Mask[]>={...db.source.redactions};for(const edit of request.edits){const f=fields.find(x=>x.id===edit.fieldId);if(!f||!f.editable)fail('VALIDATION_ERROR');const r=captureText(edit.value,this.store.secret,row.id,masks[f.id]);f.value=r.value;masks[f.id]=r.masks;}const redactions=uniqueMasks(masks);
     const info=await this.provider.describe(p.kind);
     let value=Preview.parse({...p,revision:p.revision+1,fields,redactionCount:redactions,budget:budget(p.kind,fields,p.turns,info),confirmedAt:null,safety:fields.some(f=>/суицид|самоубий|убью себя|self.harm/i.test(f.value))?'support':'none'});value={...value,snapshotHash:this.hash(value)};
-    await c.query('UPDATE app.product_previews SET value=$3,expires_at=$4 WHERE id=$1 AND user_id=$2',[p.id,row.id,value,new Date(this.store.now()+3600000)]);return {value};
+    await c.query('UPDATE app.product_previews SET value=$3,expires_at=$4,source=$5 WHERE id=$1 AND user_id=$2',[p.id,row.id,value,new Date(this.store.now()+3600000),{...db.source,redactions:masks}]);return {value};
   },true);}
   async confirm(ctx:UserContext,input:OperationInput<'confirmPreview'>,key:string){await this.sessions.dialogues.ensure(ctx);return this.store.write(ctx,'confirmPreview',input,key,async(c,row,r)=>{
     const {row:db,value:p}=await this.owned(c,row.id,r.id);if(p.revision!==r.expectedRevision)fail('REVISION_CONFLICT');if(p.snapshotHash!==r.snapshotHash||db.expires_at.getTime()<=this.store.now())fail('PREVIEW_STALE');await this.sessions.dialogues.shown(c,row.id,p);await this.dependencies(c,row.id,p);if(p.budget.fit!=='fits')fail('INPUT_TOO_LARGE');

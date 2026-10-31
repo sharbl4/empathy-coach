@@ -1,4 +1,37 @@
-# Единый старт A1 2.2.0 · web + Telegram
+# Единый старт A1 2.2.1 · 01.11.2026
+
+Этот раздел заменяет прежний статус ниже. Контракт опубликован: **9cd742fe46527710e1932035924358a85ea3df4c**, ветка `feat/web-telegram-integration`. Минимальная семантика: [contract-v2.2.1.md](contract-v2.2.1.md), точные сигнатуры: [facade-v2.2.md](facade-v2.2.md).
+
+**Общий исполняемый candidate: 6755408c3f9aea1f6766fa760e7e1de4b48747db, `test/stack-a1-nov01`.** Он содержит опубликованные backend **fabed230db9a139e8ff46a5a788ab852fa87eea2** (включает a2bb682 и перенос2.2), interfaces **f12d309e1d5ebe41f4344a3c7fcf5490c7b28556**, новый контракт и минимальные integration fixes. Это отдельная ветка для совместной проверки; GitHub PR22/23 не слиты, ветки участников не переписаны. Для запуска брать candidate целиком, не старый a2bb682 и не только contracts-ветку. Детали: [review-stack-2026-11-01.md](review-stack-2026-11-01.md).
+
+```sh
+git fetch origin
+git switch -c integration-review-nov01 origin/test/stack-a1-nov01
+git merge-base --is-ancestor 6755408c3f9aea1f6766fa760e7e1de4b48747db HEAD
+npm ci
+```
+
+Не выполнять switch поверх своей незакоммиченной работы: сначала сохранить её или создать отдельную worktree. Не cherry-pick повторно a2bb682/f12d309: их история уже присутствует. .env и IDE не перезаписывать.
+
+## Задания участникам
+
+**Дима:** совместить актуальную собственную ветку с candidate через merge без force/reset. Проверить изменения `dialogue.ts` (menu сохраняет assessment; reset требует явное confirmation), `runs.ts`/`sessions.ts` (myRating из votes в каждой owned projection), `learning.ts` (полный enum для внутреннего события). Новых таблиц/миграций не требуется. Сохранить atomic completion transaction и UNIQUE event; client recordStage отвергает run_completed. Принять DB/HTTP/lifecycle регрессии. Если появились более свежие незапушенные изменения — сначала сохранить и разрешить конфликты, не подменять их старым candidate.
+
+**Даня:** совместить свою ветку с candidate; принять preview shown binding, autosave после загрузки и отмену debounce при submit, чтение myRating, сохранение теста при /menu, resume с правильным step, отдельный подтверждённый reset, редактирование/перестановку turn по стабильному ID. Новых собственных DTO не создавать. Если тест незавершён, новый мутирующий сценарий не должен молча уничтожать его: предложить продолжить/явно сбросить. Изучить две поправки browser-тестов (настоящая новая вкладка вместо hash-only goto; дождаться завершения logout); assertions сохранены. Все13 сценариев обязательны, включая добавленные assertions оценки/reload и menu/discard.
+
+## Фактические проверки candidate
+
+Node24.22.1; PostgreSQL17.6 в отдельном Docker-контейнере, разные runtime/test DB, реальные committed facade/HTTP/browser adapter. npm build/typecheck/lint, migrations,43 contracts/root и88 domain/HTTP/bot checks,13 Playwright — успешно, пропусков0. Сохранённый legacy-набор56 checks также успешно (частично пересекается с основным, не складывать счётчики). Lifecycle использует настоящие PG/domain/workers/HTTP и явный network-free Telegram transport; проверены один домен, double close, закрытие порта/healthfile/lease. Docker production image собран, exports импортированы с `--network none` без запуска сервисов. Browser локально: установленный Chrome157 через PLAYWRIGHT_CHANNEL=chrome; CI по-прежнему закреплённый Playwright1.56.1 Chromium.
+
+Был один общий прогон88 с1fail, имя скрыл прежний reporter. Два последовательных диагностических повтора88/88 успешны; причина единичного сбоя не доказана, не объявлять её исправленной. Теперь runner выводит только статические имена упавших тестов, без raw ошибок/SQL/auth URL. FEATURES-27 — inventory, не E2E evidence. GitHub CI candidate: [run41233504509](https://github.com/sharbl4/empathy-coach/actions/runs/41233504509); итог проверяется отдельно, локальные проверки не подменяют его.
+
+## Следующий live checkpoint и доступы
+
+Сначала зафиксировать remote CI и peer acceptance исправлений; затем отдельный test bot/DB, серверные session/link/email secrets и WEB_ORIGIN в env, работающий SMTP, частный endpoint включённого домашнего GPU-ПК (включая разрешённый cloud node/ACL/firewall), SSH/Docker/persistent disk QQCloud и фактический DNS/HTTPS. Сам факт локального ответа Gemma ранее сообщил владелец; cloud→model здесь не проверялся. Секреты только env/хостинг, не Git/чат. Не переиспользовать production token для параллельного poller.
+
+На чужом телефоне: Telegram→email consent/verification→ситуация→очищенный preview→модель→сохранённый результат→одноразовая ссылка→web POST login→та же история/reload/vote→проверка второго пользователя. Затем restart/history и offline-PC error при доступной истории. Реальных SMTP/Telegram/model вызовов в этом review0, новых писем0; cloud load/VRAM/latency/полный раздел7 не подтверждены. Оценка: совместить ветки и подтвердить peer review —0.5–1 рабочего дня; live checkpoint после готовности перечисленных доступов —ещё0.5 дня, полный раздел7/нагрузка/безопасность требуют отдельного прогона и оценки по сбоям.
+
+## Архив передачи2.2.0 — ниже не текущие задания или статус
 
 **Новый контракт: a71d379b31c65167ef40ece6a384b7ee539bfdeb.** База: актуальный HEAD origin/feat/web-telegram-integration целиком после fetch. PRODUCT_CONTRACT_VERSION=2.2.0; npm workspace @between/contracts по-прежнему0.1.0. Не брать только старые31574f8/f3ebfc0/a619dab.
 Точные сигнатуры: [facade-v2.2.md](facade-v2.2.md); обязательная семантика: [contract-v2.2.md](contract-v2.2.md) + сохранённые auth/email/inbox правила [A1 resolution](contract-a1-resolution.md).

@@ -7,3 +7,4 @@ Persist stable intents/inbox/outbox, handle revisions, partial startup and shutd
 No external issues/team messages without authorization. Preserve uncommitted plans, env, IDE and applied migrations. Report actual checks and remaining live gates.
 
 Current A1 2.2: server env schemas only /runtime; public product/http graph excludes it. Persist navigation/partial answers in domain, email only emailVerification, unknown support region yields no contacts. See contract-v2.2.md and current handoff; do not reuse old signatures silently.
+2.2.1 approved: preserve assessment on menu; explicit confirmed discard only. Restore own myRating on reads; run_completed is domain-only successful transaction. Telegram thread edit/reorder keeps stable turn IDs. Read docs/contract-v2.2.1.md and current handoff before integration.

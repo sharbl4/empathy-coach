@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdtempSync,writeFileSync,unlinkSync,rmdirSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {isPrivateModelUrl} from '@between/contracts/domain';
+import {isPrivateModelUrl} from '@between/contracts/runtime';
 import {checkedCompletion} from '../lib/model-validation.mjs';
 test('production model URL refuses public inference and credential/query injection',()=>{
   for(const value of ['https://api.giga.chat/v1','https://example.org/v1','http://127.0.0.1:8080/v1','http://100.64.0.2:8080/v1?token=secret','http://key@100.64.0.2/v1'])assert.equal(isPrivateModelUrl(value,true),false);

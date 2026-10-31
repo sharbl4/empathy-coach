@@ -3,7 +3,7 @@ import {performance} from 'node:perf_hooks';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {isPrivateModelUrl} from '@between/contracts/domain';
+import {isPrivateModelUrl} from '@between/contracts/runtime';
 import {modelOutputsV2,OutputTokenLimits,validateEvidenceV2,MODEL_PROMPT_VERSION} from '@between/contracts/product';
 const {fetch,AbortSignal,TextDecoder}=globalThis;
 const arg=name=>process.argv[process.argv.indexOf(name)+1];

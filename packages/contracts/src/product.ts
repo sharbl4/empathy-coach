@@ -1,8 +1,8 @@
 /** Web + Telegram boundary v2. This replaces transport-specific v1 DTOs for new code. */
 import {z} from 'zod';
 import {Id,Goal,Revision} from './index.js';
-import {Account,AccountPatch,EmailRequest,EmailVerification,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,UpdateCursor,DeliveryFailure,type UserContext,isPrivateModelUrl} from './domain.js';
-export const PRODUCT_CONTRACT_VERSION='2.1.0';
+import {Account,AccountPatch,EmailRequest,EmailVerification,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,UpdateCursor,DeliveryFailure,type UserContext} from './domain.js';
+export const PRODUCT_CONTRACT_VERSION='2.2.0';
 const text=(max=3000)=>z.string().trim().min(1).max(max);
 const date=z.iso.date(),instant=z.iso.datetime();
 export const Empty=z.strictObject({});
@@ -39,8 +39,33 @@ export const SessionV2=z.strictObject({id:Id,input:SessionInputV2,revision:Revis
 export const PageOf=<T extends z.ZodType>(item:T)=>z.strictObject({items:z.array(item).max(50),nextCursor:text(500).nullable()});
 export const SessionPageV2=PageOf(SessionV2);
 export const ComposerDraft=z.strictObject({mode:LearningMode.optional(),title:text(200).optional(),message:text(6000).optional(),draft:text(6000).optional(),intent:z.string().max(1000).optional(),relationship:text(200).optional(),context:z.string().max(4000).optional(),contextType:ContextType.optional(),goal:Goal.optional(),guess:Guess.optional(),turns:Thread.optional()});
-export const DialogueV2=z.strictObject({revision:Revision,step:z.enum(['onboarding','email','email_code','menu','compose','guess','preview','waiting_run','exercise','roleplay','assessment','settings']),draft:ComposerDraft,sessionId:Id.nullable(),previewId:Id.nullable(),roleplayId:Id.nullable(),pendingRunId:Id.nullable()});
-export const DialoguePatch=z.strictObject({expectedRevision:Revision,step:DialogueV2.shape.step,draft:ComposerDraft,sessionId:Id.nullable(),previewId:Id.nullable(),roleplayId:Id.nullable()});
+export const DIALOGUE_TTL_SECONDS=3600,DIALOGUE_MAX_LIFETIME_SECONDS=86400;
+export const AssessmentAnswer=z.strictObject({questionId:text(100),choiceId:text(100)});
+export const PartialAssessmentAnswers=z.array(AssessmentAnswer).max(5).refine(value=>new Set(value.map(answer=>answer.questionId)).size===value.length);
+/** Navigation references domain-owned content; never stores a second preview/code/card catalogue. */
+export const DialogueNavigation=z.discriminatedUnion('kind',[
+  z.strictObject({kind:z.literal('none')}),
+  z.strictObject({kind:z.literal('preview'),previewId:Id,previewRevision:Revision,snapshotHash:z.string().regex(/^[a-f0-9]{64}$/)}),
+  z.strictObject({kind:z.literal('preview_field'),previewId:Id,previewRevision:Revision,snapshotHash:z.string().regex(/^[a-f0-9]{64}$/),fieldId:Id}),
+  z.strictObject({kind:z.literal('thread_turn'),speaker:z.enum(['self','other']),turnId:Id.nullable()}),
+  z.strictObject({kind:z.literal('card'),cardId:text(100),contentVersion:text(100)}),
+  z.strictObject({kind:z.literal('assessment'),assessmentId:Id,contentVersion:text(100),assessmentKind:z.enum(['baseline','followup']),answers:PartialAssessmentAnswers}),
+  z.strictObject({kind:z.literal('reminder_field'),field:z.enum(['localTime','timezone','quietHours'])}),
+  z.strictObject({kind:z.literal('support_region'),field:z.enum(['countryCode','region'])}),
+]);
+const dialogueState={step:z.enum(['onboarding','email','email_code','menu','compose','guess','preview','waiting_run','exercise','roleplay','assessment','card','settings','support']),draft:ComposerDraft,navigation:DialogueNavigation,sessionId:Id.nullable(),previewId:Id.nullable(),roleplayId:Id.nullable()};
+function validNavigation(value:{step:string;draft:z.infer<typeof ComposerDraft>;navigation:z.infer<typeof DialogueNavigation>;previewId:string|null}){
+  const nav=value.navigation;
+  if(nav.kind==='preview_field'||nav.kind==='preview')return value.step==='preview'&&value.previewId===nav.previewId;
+  if(nav.kind==='thread_turn')return value.step==='compose'&&value.draft.mode==='thread'&&(nav.turnId===null||!!value.draft.turns?.some(turn=>turn.id===nav.turnId));
+  if(nav.kind==='card')return value.step==='card';
+  if(nav.kind==='assessment')return value.step==='assessment';
+  if(nav.kind==='reminder_field')return value.step==='settings';
+  if(nav.kind==='support_region')return value.step==='support';
+  return !['assessment','preview'].includes(value.step);
+}
+export const DialogueV2=z.strictObject({revision:Revision,...dialogueState,pendingRunId:Id.nullable(),createdAt:instant,expiresAt:instant}).refine(validNavigation).refine(value=>{const lifetime=Date.parse(value.expiresAt)-Date.parse(value.createdAt);return lifetime>0&&lifetime<=DIALOGUE_MAX_LIFETIME_SECONDS*1000;});
+export const DialoguePatch=z.strictObject({expectedRevision:Revision,...dialogueState}).refine(validNavigation);
 export const UpdateSessionV2=z.strictObject({id:Id,expectedRevision:Revision,input:SessionInputV2});
 export const PreviewKind=z.enum(['analysis','say_direct','before_send','reply_feedback','reply_examples','clarify','exercise','exercise_feedback','roleplay_start','roleplay_turn','roleplay_feedback','card_feedback']);
 export const PreviewSource=z.discriminatedUnion('kind',[
@@ -105,7 +130,7 @@ export const CompleteContent=z.strictObject({id:text(100),contentVersion:text(10
 export const Card=z.strictObject({id:text(100),contentVersion:text(100),skill:Skill,title:text(200),theory:text(2000),example:text(1000),practice:text(1000),completed:z.boolean()});
 export const AssessmentTask=z.strictObject({id:text(100),prompt:text(1000),choices:z.array(z.strictObject({id:text(100),text:text(1000)})).min(2).max(5),rubric:z.strictObject({zero:text(500),one:text(500),two:text(500)})});
 export const AssessmentForm=z.strictObject({id:Id,contentVersion:text(100),kind:z.enum(['baseline','followup']),tasks:z.array(AssessmentTask).min(3).max(5),eligibleAt:instant,submittedAt:instant.nullable()});
-export const AssessmentSubmit=z.strictObject({id:Id,contentVersion:text(100),answers:z.array(z.strictObject({questionId:text(100),choiceId:text(100)})).min(3).max(5)}).refine(value=>new Set(value.answers.map(answer=>answer.questionId)).size===value.answers.length);
+export const AssessmentSubmit=z.strictObject({id:Id,contentVersion:text(100),expectedDialogueRevision:Revision,answers:PartialAssessmentAnswers.min(3)});
 export const AssessmentResult=z.strictObject({id:Id,kind:z.enum(['baseline','followup']),scores:z.array(z.strictObject({questionId:text(100),score:z.number().int().min(0).max(2),rationale:text(1000)})).min(3).max(5),completedAt:instant,followupEligibleAt:instant.nullable(),notice:z.literal('Учебный результат, не оценка эмпатии и не доказательство психологического эффекта')});
 export const SkillAttempt=z.strictObject({id:Id,skill:Skill,score:z.number().int().min(0).max(2),rationale:text(1000),sourceRunId:Id,createdAt:instant});
 export const ProgressV2=z.strictObject({analyzedSessions:z.number().int().nonnegative(),completedExercises:z.number().int().nonnegative(),completedRoleplays:z.number().int().nonnegative(),completedDailyPractices:z.number().int().nonnegative(),completedCards:z.number().int().nonnegative(),streak:z.strictObject({current:z.number().int().nonnegative(),best:z.number().int().nonnegative(),lastCompletedLocalDate:date.nullable()}),skills:z.array(z.strictObject({skill:Skill,completedAttempts:z.number().int().nonnegative(),latestScore:z.number().int().min(0).max(2).nullable()})).max(4),latestTip:text(500).nullable(),followupEligibleAt:instant.nullable()});
@@ -113,7 +138,10 @@ export const Vote=z.strictObject({runId:Id,value:z.enum(['useful','not_useful'])
 export const StageEvent=z.strictObject({name:z.enum(['onboarding_started','onboarding_completed','preview_created','preview_confirmed','run_completed','practice_completed','card_completed','assessment_completed']),contextType:ContextType.optional(),resourceId:Id.optional()});
 export const OperationalAnalytics=z.strictObject({events:z.array(z.strictObject({name:StageEvent.shape.name,count:z.number().int().nonnegative()})),contexts:z.array(z.strictObject({contextType:ContextType,count:z.number().int().nonnegative()})),usefulness:z.strictObject({useful:z.number().int().nonnegative(),notUseful:z.number().int().nonnegative()})});
 export const AnalyticsWindow=z.strictObject({from:instant,to:instant}).refine(value=>{const span=Date.parse(value.to)-Date.parse(value.from);return span>0&&span<=31*86400000;});
-export const Support=z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/),region:text(100).nullable(),message:text(),recognitionGuaranteed:z.literal(false),contacts:z.array(z.strictObject({label:text(200),phone:text(100).nullable(),url:z.url().nullable(),sourceUrl:z.url(),verifiedAt:instant})).max(10)});
+export const SupportLocation=z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/).nullable(),region:text(100).nullable()}).refine(value=>value.countryCode!==null||value.region===null);
+export const SupportRegionSetting=SupportLocation.safeExtend({revision:Revision});
+export const SupportRegionPatch=SupportLocation.safeExtend({expectedRevision:Revision});
+export const Support=z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/).nullable(),region:text(100).nullable(),availability:z.enum(['region_required','available','unavailable']),message:text(),recognitionGuaranteed:z.literal(false),contacts:z.array(z.strictObject({label:text(200),phone:text(100).nullable(),url:z.url().nullable(),sourceUrl:z.url(),verifiedAt:instant})).max(10)}).refine(value=>(value.countryCode!==null||value.region===null)&&(value.countryCode!==null||value.availability==='region_required')&&(value.availability==='available'||value.contacts.length===0));
 export const ProductErrorCode=z.enum(['VALIDATION_ERROR','UNAUTHORIZED','FORBIDDEN','CSRF_FAILED','ORIGIN_FORBIDDEN','EMAIL_NOT_VERIFIED','CONSENT_REQUIRED','CODE_INVALID','CODE_EXPIRED','NOT_FOUND','REVISION_CONFLICT','PREVIEW_STALE','PREVIEW_NOT_CONFIRMED','INPUT_TOO_LARGE','IDEMPOTENCY_CONFLICT','OPERATION_IN_PROGRESS','RATE_LIMITED','LINK_EXPIRED','LINK_ALREADY_USED','ACCOUNT_CONFLICT','ASSESSMENT_NOT_DUE','DEPENDENCY_UNAVAILABLE','INTERNAL_ERROR']);
 export const DomainErrorCode=ProductErrorCode;
 export const DomainFailure=z.strictObject({code:ProductErrorCode,requestId:text(100),retryAfterSeconds:z.number().int().min(0).max(300).optional()});
@@ -156,7 +184,7 @@ export const operations={
   cards:read(PageQuery.extend({skill:Skill.optional()}),PageOf(Card)),card:read(z.strictObject({id:text(100)}),Card),completeCard:write(CompleteContent,Completion),
   reminders:read(Empty,ReminderSettings),updateReminders:write(ReminderPatch,ReminderSettings),
   assessment:read(z.strictObject({kind:z.enum(['baseline','followup'])}),AssessmentForm),submitAssessment:write(AssessmentSubmit,AssessmentResult),assessmentResults:read(PageQuery,PageOf(AssessmentResult)),
-  rateRun:write(Vote,Vote),recordStage:write(StageEvent,z.null()),support:read(z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/),region:text(100).optional()}),Support),
+  rateRun:write(Vote,Vote),recordStage:write(StageEvent,z.null()),supportRegion:read(Empty,SupportRegionSetting),updateSupportRegion:write(SupportRegionPatch,SupportRegionSetting),support:read(Empty,Support),
 } as const;
 export type Operation=keyof typeof operations;
 export type OperationInput<K extends Operation>=z.infer<(typeof operations)[K]['input']>;
@@ -251,18 +279,9 @@ export const SECTION7_CAPABILITIES=[
   {feature:'Прогресс',operations:['progress']},
   {feature:'Полезность',operations:['rateRun']},
   {feature:'Аналитика',operations:['recordStage'],lifecycle:['operationalAnalytics']},
-  {feature:'Сложные ситуации',operations:['support']},
+  {feature:'Сложные ситуации',operations:['supportRegion','updateSupportRegion','support']},
   {feature:'Удаление',operations:['deleteSession','deleteData','deleteAccount']},
 ] as const satisfies ReadonlyArray<{feature:string;operations:readonly Operation[];previewKinds?:readonly z.infer<typeof PreviewKind>[];lifecycle?:readonly(keyof ProductLifecycle)[]}>;
-export const RuntimeHealth=z.strictObject({pid:z.number().int().positive(),heartbeatAt:instant,database:z.boolean(),http:z.boolean(),polling:z.boolean(),workers:z.boolean(),scheduler:z.boolean()});
-export const RuntimeEnvironmentV2=z.object({NODE_ENV:z.enum(['development','test','production']).default('development'),DATABASE_URL:z.url(),TELEGRAM_BOT_TOKEN:text(200),AI_PROVIDER:z.literal('local'),LOCAL_LLM_BASE_URL:z.url(),LOCAL_LLM_MODEL:text(200),LOCAL_LLM_API_KEY:z.string().optional(),AI_TIMEOUT_MS:z.coerce.number().int().min(1000).max(300000).default(90000),AI_MAX_CONCURRENCY:z.coerce.number().int().min(1).max(1).default(1),AI_MAX_QUEUE_LENGTH:z.coerce.number().int().min(1).max(20).default(8),SMTP_HOST:text(253),SMTP_PORT:z.coerce.number().int().min(1).max(65535).default(587),SMTP_USER:z.string().optional(),SMTP_PASSWORD:z.string().optional(),SMTP_FROM:z.email(),EMAIL_CODE_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),WEB_ORIGIN:z.url(),WEB_SESSION_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),WEB_LINK_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),PORT:z.coerce.number().int().min(1).max(65535).default(3000),TRUSTED_PROXY_IPS:z.string().default('')}).superRefine((value,ctx)=>{
-  const origin=new URL(value.WEB_ORIGIN),production=value.NODE_ENV==='production';
-  if(origin.username||origin.password||origin.search||origin.hash||origin.pathname!=='/'||(production?origin.protocol!=='https:':!['http:','https:'].includes(origin.protocol)))ctx.addIssue({code:'custom',path:['WEB_ORIGIN'],message:'Explicit origin required'});
-  if(!isPrivateModelUrl(value.LOCAL_LLM_BASE_URL,production))ctx.addIssue({code:'custom',path:['LOCAL_LLM_BASE_URL'],message:'Private model endpoint required'});
-  if(production&&(value.LOCAL_LLM_API_KEY?.length??0)<32)ctx.addIssue({code:'custom',path:['LOCAL_LLM_API_KEY'],message:'Strong endpoint key required'});
-  if(new Set([value.EMAIL_CODE_SECRET,value.WEB_SESSION_SECRET,value.WEB_LINK_SECRET]).size!==3)ctx.addIssue({code:'custom',message:'Independent secrets required'});
-  if(value.TRUSTED_PROXY_IPS.split(',').filter(Boolean).some(part=>!/^([0-9]{1,3}\.){3}[0-9]{1,3}$/.test(part.trim())||part.trim().split('.').some(octet=>Number(octet)>255)))ctx.addIssue({code:'custom',path:['TRUSTED_PROXY_IPS'],message:'Exact proxy IPs only; no wildcard, boolean or broad CIDR'});
-});
 export function validateEvidenceV2(kind:keyof typeof modelOutputsV2,output:unknown,fields:ReadonlyArray<{id:string;value:string}>){
   const result=modelOutputsV2[kind].parse(output),sources=new Map(fields.map(field=>[field.id,field.value]));
   if(kind==='analysis'){const parsed=AnalysisV2.parse(result);for(const interpretation of parsed.interpretations)for(const evidence of interpretation.evidence)if(!sources.get(evidence.fieldId)?.includes(evidence.quote))throw new Error('MODEL_INVALID_OUTPUT');}

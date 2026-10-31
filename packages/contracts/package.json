@@ -31,6 +31,12 @@
     "./product-fixtures": {
       "types": "./dist/product-fixtures.d.ts",
       "default": "./dist/product-fixtures.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "browser": null,
+      "node": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
     }
   },
   "scripts": {

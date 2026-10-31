@@ -1,19 +1,36 @@
 {
-  "name": "empathy-coach", "version": "0.1.0", "private": true,
-  "workspaces": ["packages/contracts", "apps/api", "apps/web"],
-  "engines": {"node": ">=24.22.1 <25"},
-  "scripts": {
-    "dev": "node scripts/with-env.mjs --npm-run dev:workspaces",
-    "dev:workspaces": "npm run build -w @between/contracts && concurrently -k \"npm run dev -w @between/api\" \"npm run dev -w @between/web\"",
-    "build": "npm run build -w @between/contracts && node scripts/build-web.mjs && npm run build -w @between/api",
-    "lint": "eslint . --max-warnings 0",
-    "typecheck": "npm run build -w @between/contracts && npm run typecheck --workspaces",
-    "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts scripts/test/*.test.mjs",
-    "db:migrate": "node scripts/migrate.mjs",
-    "services:check": "node scripts/with-env.mjs scripts/check-services.mjs",
-    "checkpoint:live": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/live-checkpoint.mjs",
-    "e2e": "npm run build && playwright test",
-    "start": "node scripts/with-env.mjs apps/api/dist/server.js"
+  "name": "empathy-coach",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/contracts",
+    "apps/api",
+    "apps/bot"
+  ],
+  "engines": {
+    "node": ">=24.22.1 <25"
   },
-  "devDependencies": {"@eslint/js":"9.39.1", "eslint":"9.39.1", "typescript-eslint":"8.46.2", "typescript":"5.9.3", "tsx":"4.20.6", "concurrently":"9.2.5", "@types/node":"24.10.0", "@playwright/test":"1.56.1"}
+  "scripts": {
+    "dev": "node scripts/build-telegram.mjs && node scripts/launch-bot.mjs --dev",
+    "build": "node scripts/build-telegram.mjs",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "node scripts/build-telegram.mjs --typecheck",
+    "test:contracts": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts scripts/test/telegram-root.test.mjs",
+    "test": "npm run test:contracts && node scripts/test-domain.mjs",
+    "test:legacy": "npm run build -w @between/contracts && tsx --test apps/api/test/*.test.ts scripts/test/readiness.test.mjs scripts/test/env-launcher.test.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "services:check": "node scripts/with-env.mjs scripts/telegram-services.mjs",
+    "model:check": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/model-benchmark.mjs",
+    "e2e": "node scripts/check-telegram-live.mjs",
+    "start": "node scripts/launch-bot.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "eslint": "9.39.1",
+    "typescript-eslint": "8.46.2",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "@types/node": "24.10.0",
+    "@playwright/test": "1.56.1"
+  }
 }

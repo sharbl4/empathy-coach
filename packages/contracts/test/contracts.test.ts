@@ -26,7 +26,7 @@ test('provider JSON schemas generate and contextual quotes are checked',()=>{
   assert.throws(()=>validateReplyEvidence(outputFixtures.reply_feedback,'Другая фраза'));
 });
 test('documentation JSON examples match each endpoint schema',()=>{
-  const doc=readFileSync('docs/api.md','utf8');
+  const doc=readFileSync('docs/archive/http-api-v0.1.md','utf8');
   const examples=[...doc.matchAll(/<!-- schema:(\w+)\.(body|response) -->\s*```json\s*([\s\S]*?)```/g)];
   assert.equal(examples.length,Object.values(api).reduce((n,r)=>n+1+('body' in r?1:0),0));
   for(const [,name,part,json] of examples){const route=api[name as keyof typeof api];assert.ok(route);const schema=part==='body'&&'body' in route?route.body:route.response;schema.parse(JSON.parse(json));}

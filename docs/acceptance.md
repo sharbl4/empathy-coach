@@ -1,25 +1,23 @@
-# Приёмка и границы проверок
+# Приёмка Telegram-only
 
-CI: чистое npm ci, lint, typecheck, схемы/фикстуры/JSON docs, HTTP health/error, Playwright с настоящим HTTP, production build, Docker build/runtime. После storage PR #1 CI также мигрирует runtime-БД, отдельную пустую storage test-БД дважды и запускает реальные DB-тесты с NODE_ENV=test. Отсутствие TEST_DATABASE_URL больше не позволяет незаметно пропустить storage tests в CI при наличии мигратора.
-Это проверка реализованного storage, а не готовность всей v1. Полный продуктовый E2E и живые Auth/GigaChat/почта остаются отдельными незавершёнными gates.
+Решение Антона 31.10.2026 заменяет browser E2E/HTTPS SPA/Supabase/GigaChat. Независимые ownership/revision/idempotency/deletion/validation проверки обязательны.
 
-Обязательные release gates (пока не пройдены):
+CI: contracts first, root checks, library import без сервера, build bot image без web/hosted inference, новые реальные DB-тесты фасады. Нет фасады/бота/новых DB-тестов → явный блокирующий integration gate. Архив/фикстуры не новый live.
 
-- Все 12 пунктов docs/product.md и пять учебных механик на живой модели.
-- Письма регистрации/confirmation/recovery новому внешнему пользователю, повторный вход/выход.
-- Два аккаунта: чужие sessions/runs/roleplays и вложенные ID недоступны.
-- Revision conflict, старые результаты не показаны как текущие; параллельные вкладки не затирают данные.
-- Duplicate POST не дублирует ходы/события; ключ с иным payload → 409.
-- Failed turn/finish retry не дублирует пользовательскую реплику; третий ход и ранний finish сохраняют итог.
-- Restart pending → RUN_INTERRUPTED, неопределённый платный вызов не повторяется автоматически.
-- Timeout/429/invalid JSON/отказ модели, Auth/DB outage, отсутствие ключа, восстановление UI без потери ввода.
-- Refresh/relogin/restart сохраняют историю, ожидание и шаги. Поиск/пагинация не пересекают владельцев.
-- Удаление сессии/всех данных удаляет прогресс; поздний output не восстанавливает удалённое.
-- Пустая БД мигрирует; повтор миграции безопасен; test/seed не используют production.
-- Full Playwright: Auth → session → analyze → reply → exercise → role → history → progress → delete.
-- Production не допускает тестовый Auth bypass; mock явно обозначен, live error не подменяется.
-- Mobile/keyboard/labels/focus, все loading/empty/error/retry состояния.
-- Docker runtime, ready с реальной БД, HTTPS, SPA refresh и неизвестный /api возвращает JSON 404.
-- Secrets/переписок/ответов/токенов нет в Git, клиенте и логах; backup и откат проверены.
+Реальные gates:
 
-Реальный Auth и GigaChat live проверяются отдельно от CI; test adapters не подтверждают доступность сервисов.
+- Отдельные test bot/database, секреты настроены владельцем без вывода.
+- Чужой телефон: Telegram → QQCloud → Windows llama.cpp → валидированный ответ. Нет запросов GigaChat/Supabase/hosted inference и сайта.
+- Настоящие SMTP-коды/confirmation, TTL/attempt/resend/одноразовость; согласие/отказ/отзыв/onboarding.
+- Все механики product.md, say_direct, история и диалог сохраняются после restart.
+- Два аккаунта: forged context/чужие object IDs/callbacks/group/channel не дают доступа.
+- Повтор update/неопределённый ответ/конкурентность/revision и второй poller не дублируют операции.
+- Выключение/сон ПК/потеря сети → понятная ошибка, история доступна, нет выдуманного ответа. Восстановление только через явный retry.
+- Strict JSON/evidence, нет reasoning в ответе; injection остаётся данными; большой input не теряется молча.
+- Удаление/поздний output/backup и restore на отдельной БД. Старые миграции/данные сохранены.
+- Stop/reboot/lease, один poller, длительная нагрузка 1CPU/2GB; PG не опубликован.
+- Проверены cloud→model и запрет постороннему узлу, фактический direct/relay.
+- Записаны hash/model/version/license, VRAM, RAM bot+DB/запас ОС, N запросов, p50/p95/failed/invalid. Лимиты не доказательство работы.
+- Нет приватного контента/email/кодов/токенов в логах/Git. Правовая готовность Telegram/SMTP/мест размещения проверяется отдельно.
+
+Статус: контракт проверен; фасада/transport зависят от #15/#16. Домашний GPU/QQCloud недоступны. Новых реальных LLM/Telegram запросов 0, p50/p95/VRAM/нагрузочная RAM не измерены.

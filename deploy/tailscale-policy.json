@@ -1,0 +1,5 @@
+{
+  "tagOwners":{"tag:coach-bot":["autogroup:admin"],"tag:coach-llm":["autogroup:admin"]},
+  "grants":[{"src":["tag:coach-bot"],"dst":["tag:coach-llm"],"ip":["tcp:8080"]}],
+  "tests":[{"src":"tag:coach-bot","accept":["tag:coach-llm:8080"],"deny":["tag:coach-llm:22"]}]
+}

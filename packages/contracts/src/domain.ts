@@ -6,6 +6,8 @@ const text=(max:number)=>z.string().trim().min(1).max(max);
 /** PostgreSQL BIGINT; never a JS number at this boundary. */
 export const TelegramUserId=z.string().regex(/^[1-9][0-9]{0,18}$/).refine(value=>BigInt(value)<=9223372036854775807n);
 export const TelegramUpdateId=z.string().regex(/^(0|[1-9][0-9]{0,18})$/).refine(value=>BigInt(value)<=9223372036854775807n);
+export const UpdateReceipt=z.strictObject({updateId:TelegramUpdateId,intentKey:Id,status:z.enum(['processing','completed'])});
+export const UpdateCursor=z.strictObject({nextOffset:TelegramUpdateId});
 export const PrivateTelegramIdentity=z.strictObject({telegramUserId:TelegramUserId,privateChatId:TelegramUserId,updateId:TelegramUpdateId}).refine(value=>value.telegramUserId===value.privateChatId,'Private chat must match sender');
 export type PrivateTelegramIdentity=z.infer<typeof PrivateTelegramIdentity>;
 export type TelegramUserId=z.infer<typeof TelegramUserId>;
@@ -22,6 +24,9 @@ export const EMAIL_CODE_TTL_SECONDS=600;
 export const EMAIL_CODE_MAX_ATTEMPTS=5;
 export const EMAIL_RESEND_SECONDS=60;
 export const IdempotencyKey=Id;
+export const DeleteAccount=z.strictObject({confirmation:z.literal('DELETE_MY_ACCOUNT')});
+export const BOT_HEALTH_FILE='/tmp/between-bot-health.json';
+export const BotHealth=z.strictObject({pid:z.number().int().positive(),heartbeatAt:z.iso.datetime(),database:z.boolean(),pollerLease:z.boolean(),polling:z.boolean()});
 export const DialogueStage=z.enum(['onboarding','email','email_code','menu','message','relationship','context','goal','guess','draft','exercise_answer','roleplay','direct_feeling','direct_need','direct_request','waiting_run']);
 export const DialogueDraft=z.strictObject({title:text(200).optional(),message:text(6000).optional(),relationship:text(200).optional(),context:z.string().max(4000).optional(),goal:Goal.optional(),emotions:z.array(text(100)).max(3).optional(),evidenceQuotes:z.array(text(6000)).max(3).optional(),unsure:z.boolean().optional(),draft:text(3000).optional(),feeling:text(300).optional(),need:text(500).optional(),request:text(1000).optional()});
 export const Dialogue=z.strictObject({revision:Revision,stage:DialogueStage,draft:DialogueDraft,sessionId:Id.nullable(),roleplayId:Id.nullable(),pendingRunId:Id.nullable()});
@@ -47,7 +52,11 @@ export type DomainFailure=z.infer<typeof DomainFailure>;
 type Input<S extends z.ZodType>=z.infer<S>;
 /** Direct method calls only. No Fastify, Supabase token or HTTP client between bot and domain. */
 export interface DomainFacade {
+  readonly shutdownSignal:AbortSignal;
+  updateCursor():Promise<Input<typeof UpdateCursor>>;
   resolveUser(identity:PrivateTelegramIdentity):Promise<UserContext>;
+  claimUpdate(ctx:UserContext,updateId:string):Promise<Input<typeof UpdateReceipt>>;
+  acknowledgeUpdate(updateId:string):Promise<void>;
   account(ctx:UserContext):Promise<Input<typeof Account>>;
   updateAccount(ctx:UserContext,input:Input<typeof AccountPatch>,key:string):Promise<Input<typeof Account>>;
   acceptConsent(ctx:UserContext,input:Input<typeof ConsentAcceptance>,key:string):Promise<Input<typeof Account>>;
@@ -63,7 +72,7 @@ export interface DomainFacade {
   updateSession(ctx:UserContext,id:string,input:Input<typeof UpdateSession>,key:string):Promise<Input<typeof Session>>;
   deleteSession(ctx:UserContext,id:string,key:string):Promise<void>;
   deleteData(ctx:UserContext,input:Input<typeof DeleteData>,key:string):Promise<void>;
-  deleteAccount(ctx:UserContext,input:{confirmation:'DELETE_MY_ACCOUNT'},key:string):Promise<void>;
+  deleteAccount(ctx:UserContext,input:Input<typeof DeleteAccount>,key:string):Promise<void>;
   analyze(ctx:UserContext,id:string,input:Input<typeof ExpectedRevision>,key:string):Promise<Input<typeof RunAccepted>>;
   replyFeedback(ctx:UserContext,id:string,input:Input<typeof ReplyRequest>,key:string):Promise<Input<typeof RunAccepted>>;
   replyExamples(ctx:UserContext,id:string,input:Input<typeof ExpectedRevision>,key:string):Promise<Input<typeof RunAccepted>>;
@@ -88,12 +97,26 @@ export interface DomainOptions {
   botId:string;
 }
 export type CreateDomain=(options:DomainOptions)=>Promise<DomainFacade>;
+export function isPrivateModelUrl(value:string,production=false):boolean {
+  try{
+    const url=new URL(value);
+    if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash||!/\/v1\/?$/.test(url.pathname))return false;
+    const parts=url.hostname.split('.').map(Number),ipv4=parts.length===4&&parts.every(n=>Number.isInteger(n)&&n>=0&&n<=255);
+    const tailnet=ipv4&&parts[0]===100&&parts[1]>=64&&parts[1]<=127;
+    const local=!production&&(url.hostname==='localhost'||url.hostname==='[::1]'||(ipv4&&(parts[0]===127||parts[0]===10||(parts[0]===172&&parts[1]>=16&&parts[1]<=31)||(parts[0]===192&&parts[1]===168))));
+    // Use numeric Tailscale IPs to avoid DNS rebinding/public endpoint ambiguity.
+    return tailnet||local;
+  }catch{return false;}
+}
 export const RuntimeEnvironment=z.object({
   NODE_ENV:z.enum(['development','test','production']).default('development'),DATABASE_URL:z.string().url(),
   TELEGRAM_BOT_TOKEN:z.string().regex(/^[0-9]+:[A-Za-z0-9_-]{20,}$/),AI_PROVIDER:z.literal('local'),
   LOCAL_LLM_BASE_URL:z.string().url().refine(value=>{const url=new URL(value);return ['http:','https:'].includes(url.protocol)&&!url.username&&!url.password&&!url.search&&!url.hash&&/\/v1\/?$/.test(url.pathname);}),
   LOCAL_LLM_MODEL:text(200),LOCAL_LLM_API_KEY:z.string().optional(),AI_TIMEOUT_MS:z.coerce.number().int().min(1000).max(300000).default(90000),AI_MAX_CONCURRENCY:z.coerce.number().int().min(1).max(2).default(1),
   SMTP_HOST:text(253),SMTP_PORT:z.coerce.number().int().min(1).max(65535).default(587),SMTP_USER:z.string().optional(),SMTP_PASSWORD:z.string().optional(),SMTP_FROM:z.email(),EMAIL_CODE_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),
+}).superRefine((value,ctx)=>{
+  if(!isPrivateModelUrl(value.LOCAL_LLM_BASE_URL,value.NODE_ENV==='production'))ctx.addIssue({code:'custom',path:['LOCAL_LLM_BASE_URL'],message:'Private model endpoint required'});
+  if(value.NODE_ENV==='production'&&(value.LOCAL_LLM_API_KEY?.length??0)<32)ctx.addIssue({code:'custom',path:['LOCAL_LLM_API_KEY'],message:'Strong model authentication key required'});
 });
 // All live DTO validators available to both transport and facade implementer.
 export {Id,Revision,Goal,SessionInput,UpdateSession,Session,SessionDetail,SessionQuery,SessionPage,RunAccepted,ReplyRequest,ExpectedRevision,ExerciseAnswer,TurnRequest,Progress,DeleteData};

@@ -2,6 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {TelegramUserId,PrivateTelegramIdentity,EmailVerification,SayDirectRequest,DomainRun,DialogueUpdate,domainOutputs} from '../src/domain.js';
 import {id,timestamp,outputFixtures} from '../src/fixtures.js';
+import {validateDomainFixtures} from '../src/domain-fixtures.js';
+test('shared Telegram account/dialogue/email/direct fixtures validate',validateDomainFixtures);
 test('Telegram IDs survive beyond JS precision and fit PostgreSQL BIGINT',()=>{
   assert.equal(TelegramUserId.parse('9007199254740993'),'9007199254740993');
   for(const value of [123,'0','01','-1','9223372036854775808'])assert.equal(TelegramUserId.safeParse(value).success,false);

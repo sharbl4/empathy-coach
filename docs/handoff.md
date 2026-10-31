@@ -1,5 +1,21 @@
 # Передача foundation
 
+## Актуальная передача Telegram-only · 31.10.2026
+
+Всё ниже этого блока о web/Supabase/GigaChat — история, не текущая инструкция. Антон явно сменил runtime на Telegram + QQCloud bot/PG + локальная Windows-модель по private network. Рабочая ветка feat/telegram-integration. Первый контракт 860cd33de38af8baa25fb770e7757d9421ca85d1; актуальная сигнатура @between/contracts/domain дополнена updateCursor/claimUpdate/acknowledgeUpdate/shutdownSignal и private BotHealth до принятия участниками. Точный финальный commit передаётся в отчёте, не вычисляется по старому main.
+
+Дима #15: apps/api/src/domain/facade.ts, типизированный createDomain, новые миграции/SMTP/local provider и domain*.test.ts. Даня #16: apps/bot/src/main.ts, private transport/scenarios и apps/bot/test/*.test.ts. Root metadata/entry/lock/CI ведёт Антон. Ответ/принятие от Димы пока не получены; не заявляется согласование за участника.
+
+Проверено локально: lint; 15 contracts/root checks, 0skips; PowerShell syntax всех 4 скриптов; production compose bot+db без ports/build/legacy env. Сохранённые 23 legacy проверки прошли с отдельной реальной PG и 0skips; migration/schema/ownership/restart регрессии подтверждены только в старом transport. Реальный pg_dump/pg_restore непустой синтетической ситуации в новую БД проверен сравнением данных в памяти; это старая схема, не Telegram account/dialogue migrations. Применённые SQL не изменены.
+
+Полный build/typecheck/start/new DB-test gate явно блокируется отсутствующими facade.ts и main.ts/новыми тестами. Нет mock-заглушки. CI разделяет contracts/root и обязательную integration job; до PR участников весь CI не зелёный.
+
+Qwen3-8B GGUF Q4_K_M и llama b12019 CUDA12.4 источники/хеши закреплены. На доступном ПК только Intel Graphics; RTX находится на другом ПК, подтверждено Антоном. Бинарник/GPU/модель на нём не запускались, Tailscale не настроен, QQCloud доступа нет. N=0, p50/p95/VRAM/нагрузочная RAM неизвестны. См. runbook.md/local-model.md; реальная генерация объявляется перед запуском.
+
+Старый незавершённый self-hosted Auth сохранён в stash с причиной, не удалён и не включён в runtime. .env владельца не перезаписывался; .vscode untracked не трогался. Старый draft #11/#12 не сливать поверх новой схемы без адаптации. Исторические данные/аккаунты автоматически по Telegram/email не связывать.
+
+## История прежнего foundation
+
 Исходный контракт: packages/contracts 0.1.0. Антон принял foundation как основу; Дима начинает feat/api-storage, Даня — feat/web-account. SQL/зависимости ещё требуют review Димы, согласование за участников не заявляется.
 Рабочая ветка feat/foundation. Точный стартовый commit — HEAD ветки после передачи; финальный отчёт содержит полный SHA.
 

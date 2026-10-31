@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {operations,type Operation,Empty,Id,PageQuery,PublicWebSession,WebLinkStart,WebLink,WebSessionPage,ProductError} from './product.js';
+import {operations,type Operation,Empty,Id,PageQuery,PublicWebSession,WebEntry,RedeemWebLink,WebSessionPage,ProductError} from './product.js';
 export const IdempotencyRequestHeaders=z.object({'idempotency-key':Id,'x-csrf-token':z.string().min(32).max(200)});
 export const WriteHeaders=z.object({'x-csrf-token':z.string().min(32).max(200)});
 function route<K extends Operation>(method:'GET'|'POST'|'PATCH'|'DELETE',path:string,operation:K){return {method,path,operation,auth:'server-session' as const,...operations[operation]};}
@@ -23,9 +23,8 @@ export const webApi={
 } as const;
 export const authApi={
   session:{method:'GET',path:'/api/auth/session',input:Empty,response:PublicWebSession},
-  beginWebLink:{method:'POST',path:'/api/auth/web-links',input:Empty,response:WebLinkStart},
-  webLinkStatus:{method:'GET',path:'/api/auth/web-links/:id',input:z.strictObject({id:Id}),response:WebLink},
-  consumeWebLink:{method:'POST',path:'/api/auth/web-links/:id/consume',input:z.strictObject({id:Id}),response:PublicWebSession},
+  entry:{method:'GET',path:'/api/auth/entry',input:Empty,response:WebEntry},
+  redeemWebLink:{method:'POST',path:'/api/auth/web-links/redeem',input:RedeemWebLink,response:PublicWebSession},
   logout:{method:'POST',path:'/api/auth/logout',input:Empty,response:z.null()},
   sessions:{method:'GET',path:'/api/auth/sessions',input:PageQuery,response:WebSessionPage},
   revokeSession:{method:'DELETE',path:'/api/auth/sessions/:id',input:z.strictObject({id:Id}),response:z.null()},

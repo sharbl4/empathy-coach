@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {operations,SessionInputV2,Thread,EditPreview,StartRun,PublicWebSession,TokenBudget,ReminderPatch,AssessmentSubmit,validateEvidenceV2,ProductErrorCode} from '../src/product.js';
+import {operations,SessionInputV2,Thread,EditPreview,StartRun,PublicWebSession,TokenBudget,ReminderPatch,AssessmentSubmit,validateEvidenceV2,ProductErrorCode,IssuedWebLink,RedeemWebLink} from '../src/product.js';
 import {webApi,authApi,HttpErrorStatus,IdempotencyRequestHeaders} from '../src/http.js';
 import {productInput,previewFixture,analysisFixture,publicSession,validateProductFixtures} from '../src/product-fixtures.js';
 import {id} from '../src/fixtures.js';
@@ -8,7 +8,7 @@ test('shared v2 product examples validate',validateProductFixtures);
 test('every user operation has one typed HTTP binding and errors have exact statuses',()=>{
   assert.deepEqual(Object.keys(webApi).toSorted(),Object.keys(operations).toSorted());
   for(const code of ProductErrorCode.options)assert.ok(HttpErrorStatus[code]);
-  assert.equal(authApi.consumeWebLink.response,PublicWebSession);
+  assert.equal(authApi.redeemWebLink.response,PublicWebSession);
   assert.equal(IdempotencyRequestHeaders.safeParse({'idempotency-key':id}).success,false);
 });
 test('strict DTOs reject authority, scoring and model-history injection',()=>{
@@ -32,4 +32,12 @@ test('generation requires preview/revision and internally consistent token budge
 test('private cookie material cannot be serialized as a public session',()=>{
   for(const field of ['setSessionCookie','sessionToken','DATABASE_URL','TELEGRAM_BOT_TOKEN','sessionSecret'])assert.equal(PublicWebSession.safeParse({...publicSession,[field]:'do-not-disclose'}).success,false);
   assert.equal(ReminderPatch.safeParse({expectedRevision:1,enabled:true,timezone:'Server/Guess',localTime:'19:00',quietHours:{enabled:false,start:'22:00',end:'08:00'}}).success,false);
+});
+
+test('bot-issued web link keeps token in fragment and redemption requires explicit confirmation',()=>{
+  const token='a'.repeat(43),link={id,webUrl:'https://example.invalid/auth/connect#token='+token,expiresAt:'2026-11-01T00:00:00.000Z'};
+  assert.equal(IssuedWebLink.safeParse(link).success,true);
+  for(const webUrl of ['https://example.invalid/auth/connect?token='+token,'https://example.invalid/other#token='+token])assert.equal(IssuedWebLink.safeParse({...link,webUrl}).success,false);
+  assert.equal(RedeemWebLink.safeParse({token,confirmed:true}).success,true);
+  for(const body of [{token},{token,confirmed:false},{token,confirmed:true,ownerId:id}])assert.equal(RedeemWebLink.safeParse(body).success,false);
 });

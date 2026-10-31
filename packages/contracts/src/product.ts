@@ -128,13 +128,13 @@ export type UserMethods={[K in Operation]:(ctx:UserContext,input:OperationInput<
 export const WEB_LINK_TTL_SECONDS=300,WEB_SESSION_TTL_SECONDS=86400,WEB_SESSION_IDLE_SECONDS=7200;
 export const WEB_SESSION_COOKIE='__Host-between-session',WEB_BINDING_COOKIE='__Host-between-link';
 export const DevSessionCookie='between_session_dev',DevBindingCookie='between_link_dev';
-export const WebLinkId=Id;
-export const WebLinkStatus=z.enum(['pending','approved','denied','consumed','expired']);
-export const WebLink=z.strictObject({id:Id,status:WebLinkStatus,expiresAt:instant,pollAfterMs:z.number().int().min(1000).max(5000)});
-export const WebLinkStart=WebLink.extend({telegramUrl:z.url(),confirmationCode:z.string().regex(/^[0-9]{8}$/)});
+export const WebEntry=z.strictObject({telegramUrl:z.url().refine(value=>{try{const url=new URL(value);return url.protocol==='https:'&&url.hostname==='t.me'&&!url.username&&!url.password;}catch{return false;}})});
+/** Private bot response: contains a bearer link in the fragment. Never log/serialize via public HTTP. */
+export const IssuedWebLink=z.strictObject({id:Id,webUrl:z.url().refine(value=>{try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)&&!url.username&&!url.password&&!url.search&&url.pathname==='/auth/connect'&&/^#token=[A-Za-z0-9_-]{43,256}$/.test(url.hash);}catch{return false;}}),expiresAt:instant});
+export const RedeemWebLink=z.strictObject({token:z.string().regex(/^[A-Za-z0-9_-]{43,256}$/),confirmed:z.literal(true)});
 export const PublicWebSession=z.discriminatedUnion('authenticated',[
-  z.strictObject({authenticated:z.literal(false),csrfToken:text(200)}),
-  z.strictObject({authenticated:z.literal(true),account:Account,csrfToken:text(200),expiresAt:instant}),
+  z.strictObject({authenticated:z.literal(false),csrfToken:z.string().min(32).max(200)}),
+  z.strictObject({authenticated:z.literal(true),account:Account,csrfToken:z.string().min(32).max(200),expiresAt:instant}),
 ]);
 export const WebSessionInfo=z.strictObject({id:Id,createdAt:instant,expiresAt:instant,isCurrent:z.boolean()});
 export const WebSessionPage=PageOf(WebSessionInfo);
@@ -157,11 +157,9 @@ export interface ProductLifecycle {
   resolveUser(identity:z.infer<typeof PrivateTelegramIdentity>):Promise<UserContext>;
   resolveWebSession(serverCookieToken:string):Promise<UserContext>;
   openBrowser(serverBindingCookieToken?:string,serverSessionCookieToken?:string):Promise<BrowserAccess>;
-  beginWebLink(browser:BrowserContext,key:string):Promise<z.infer<typeof WebLinkStart>>;
-  webLinkStatus(browser:BrowserContext,id:string):Promise<z.infer<typeof WebLink>>;
-  consumeWebLink(browser:BrowserContext,id:string,key:string):Promise<ConsumedWebLink>;
-  inspectWebLink(ctx:UserContext,claimCode:string,key:string):Promise<z.infer<typeof WebLinkStart>>;
-  approveWebLink(ctx:UserContext,input:{id:string;decision:'approve'|'deny'},key:string):Promise<z.infer<typeof WebLink>>;
+  webEntry():Promise<z.infer<typeof WebEntry>>;
+  issueWebLink(ctx:UserContext,key:string):Promise<z.infer<typeof IssuedWebLink>>;
+  redeemWebLink(browser:BrowserContext,input:z.infer<typeof RedeemWebLink>,key:string):Promise<ConsumedWebLink>;
   webSessions(ctx:UserContext,input:z.infer<typeof PageQuery>):Promise<z.infer<typeof WebSessionPage>>;
   revokeWebSession(ctx:UserContext,id:string,key:string):Promise<void>;
   revokeCurrentWebSession(ctx:UserContext,key:string):Promise<void>;

@@ -24,6 +24,7 @@ test('bot-issued link, explicit POST login, common history, refresh, logout and 
   try{await login(otherPage,'B');await otherPage.goto('/history');await expect(otherPage.getByText('Тестовая история участника A',{exact:true})).toHaveCount(0);}
   finally{await other.close();}
   await page.getByRole('button',{name:'Выйти',exact:true}).click();
+  await expect(page).toHaveURL(/\/auth\/login$/);
   const session=await page.request.get('/api/auth/session');expect((await session.json()).authenticated).toBe(false);
   await page.reload();await expect(page.getByText('Тестовая история участника A',{exact:true})).toHaveCount(0);
 });

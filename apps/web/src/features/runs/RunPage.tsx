@@ -27,7 +27,7 @@ export function RunPage({id}:{id:string}) {
       {run.sessionId&&<p><Link to={`/sessions/${run.sessionId}`}>← К ситуации</Link></p>}
       {run.status==='pending'&&<><Loading label={run.phase==='queued'?`В очереди${run.queuePosition?`: место ${run.queuePosition}`:''}`:'Модель отвечает'}/>{state.timedOut&&<Notice>Ответ задерживается. Можно уйти со страницы — результат сохранится в истории и придёт в бот.</Notice>}{state.error!==undefined&&<Notice tone="error">{errorText(state.error)}</Notice>}</>}
       {run.status==='failed'&&<Notice tone="error" title="Не удалось получить ответ" action={run.errorCode!=='PREVIEW_STALE'&&run.errorCode!=='INPUT_TOO_LARGE'?<Button variant="secondary" busy={busy} onClick={()=>void retry()}>Повторить</Button>:undefined}>{runFailure[run.errorCode]} Сохранённые данные не потеряны.{retryError&&<p>{retryError}</p>}</Notice>}
-      {run.status==='succeeded'&&<><RunResult run={run} preview={preview.data}/><Usefulness runId={run.id}/></>}
+      {run.status==='succeeded'&&<><RunResult run={run} preview={preview.data}/><Usefulness runId={run.id} myRating={run.myRating}/></>}
     </>
   );
 }

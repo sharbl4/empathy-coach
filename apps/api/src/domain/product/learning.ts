@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
-import {ReminderSettings,Practice,Completion,AssessmentForm,AssessmentResult,ReminderNotification,AnalyticsWindow,SkillAttempt,StageEvent,type OperationInput,type UserContext} from '@between/contracts/product';
+import {ReminderSettings,Practice,Completion,AssessmentForm,AssessmentResult,ReminderNotification,AnalyticsWindow,SkillAttempt,DomainStageEventName,type OperationInput,type UserContext} from '@between/contracts/product';
 import {Store,fail,paginate,cursorCodec,type AccountRow} from './core.js';
 import {cards,examples,skills,assessmentTasks,rubric} from './catalogue.js';
 import type {ProductRuns} from './runs.js';
@@ -47,7 +47,7 @@ export class Learning {
       const id=randomUUID(),value=SkillAttempt.parse({id,skill,...rubric(skill,answer),sourceRunId:run.id,createdAt:new Date(this.store.now()).toISOString()});await c.query('INSERT INTO app.product_skill_attempts(id,user_id,source_run_id,value) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[id,row.id,run.id,value]);
     }
   }
-  async event(c:PoolClient,user:string,name:ReturnType<typeof StageEvent.parse>['name'],resourceId?:string,contextType?:string){await c.query('INSERT INTO app.product_events(id,user_id,name,context_type,resource_id,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[randomUUID(),user,name,contextType??null,resourceId??null,new Date(this.store.now())]);}
+  async event(c:PoolClient,user:string,name:ReturnType<typeof DomainStageEventName.parse>,resourceId?:string,contextType?:string){await c.query('INSERT INTO app.product_events(id,user_id,name,context_type,resource_id,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING',[randomUUID(),user,name,contextType??null,resourceId??null,new Date(this.store.now())]);}
   progress(ctx:UserContext){return this.store.read(ctx,true,async(c,row)=>{
     const runs=(await c.query("SELECT value FROM app.product_runs WHERE user_id=$1 AND value->>'status'='succeeded' ORDER BY created_at DESC",[row.id])).rows.map(r=>r.value),counts=(await c.query("SELECT count(*) FILTER(WHERE kind='daily')::int AS daily,count(*) FILTER(WHERE kind='card')::int AS cards FROM app.product_completions WHERE user_id=$1",[row.id])).rows[0],roles=(await c.query("SELECT count(*)::int n FROM app.product_roles WHERE user_id=$1 AND value->>'status'='completed'",[row.id])).rows[0].n;
     const dates=(await c.query('SELECT DISTINCT local_date::text date FROM app.product_completions WHERE user_id=$1 ORDER BY date',[row.id])).rows.map(r=>r.date as string);let best=0,streak=0,last:string|null=null;for(const date of dates){streak=last&&Date.parse(date)-Date.parse(last)===86400000?streak+1:1;best=Math.max(best,streak);last=date;}

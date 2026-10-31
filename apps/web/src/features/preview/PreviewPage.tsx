@@ -6,6 +6,7 @@ import {Button,Loading,Notice} from '../../components/ui';
 import {api,errorText,newKey} from '../../lib/api';
 import {kindLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
+import {saveDialogue} from '../../lib/dialogue';
 import {recordStage} from '../../lib/stage';
 
 type Pv=z.infer<typeof Preview>;
@@ -35,6 +36,12 @@ export function PreviewPage({id}:{id:string}) {
   const [busy,setBusy]=useState<'save'|'send'|null>(null);const [error,setError]=useState<string|null>(null);
   const keys=useRef({edit:newKey(),confirm:newKey(),start:newKey()});
   useEffect(()=>{if(loaded.data){setPreview(loaded.data);setEdits({});}},[loaded.data]);
+  const [shown,setShown]=useState(false);
+  useEffect(()=>{
+    if(!preview)return;let cancelled=false;setShown(false);
+    void api('dialogue',{}).then(d=>saveDialogue(d,{step:'preview',sessionId:preview.sessionId,previewId:preview.id,roleplayId:preview.dependencies.find(dep=>dep.kind==='roleplay')?.id??null,navigation:{kind:'preview',previewId:preview.id,previewRevision:preview.revision,snapshotHash:preview.snapshotHash}})).then(()=>{if(!cancelled)setShown(true);},e=>{if(!cancelled)setError(errorText(e));});
+    return ()=>{cancelled=true;};
+  },[preview]);
   if(loaded.loading&&!preview)return <Loading label="Готовим предпросмотр"/>;
   if(!preview)return <Notice tone="error" action={<Button variant="secondary" onClick={loaded.reload}>Повторить</Button>}>{errorText(loaded.error)}</Notice>;
   const dirty=Object.entries(edits).some(([fieldId,value])=>preview.fields.find(f=>f.id===fieldId)?.value!==value);
@@ -70,14 +77,14 @@ export function PreviewPage({id}:{id:string}) {
           ):(
             <div className="field" key={f.id}><span className="field-label"><strong>{label}</strong> <span className="small muted">только чтение</span></span><p className="message">{f.value||'—'}</p></div>
           );})}
-        {dirty&&<div className="actions"><Button type="submit" variant="secondary" busy={busy==='save'}>Сохранить правки и обновить предпросмотр</Button></div>}
+        {dirty&&<div className="actions"><Button type="submit" variant="secondary" busy={busy==='save'} disabled={!shown}>Сохранить правки и обновить предпросмотр</Button></div>}
       </form>
       <p className="small muted">Бюджет модели: ввод {preview.budget.inputTokens}, ответ до {preview.budget.maxOutputTokens}, окно {preview.budget.contextWindow} токенов{preview.budget.fit==='unknown'?' — проверить заранее не удалось':''}.</p>
       {tooLarge&&<Notice tone="error">Текст не помещается в контекст модели. Сократите поля — обрезать молча не будем.</Notice>}
       {preview.budget.fit==='unknown'&&<Notice tone="error">Размер текста для модели не удалось проверить — отправка недоступна. Сократите текст или попробуйте позже.</Notice>}
       {error&&<Notice tone="error">{error}</Notice>}
       {preview.safety!=='support'&&<div className="actions">
-        <Button busy={busy==='send'} disabled={dirty||!fits||busy!==null} onClick={()=>void send()}>Отправить в модель</Button>
+        <Button busy={busy==='send'} disabled={dirty||!fits||!shown||busy!==null} onClick={()=>void send()}>Отправить в модель</Button>
         {dirty&&<span className="small muted">Сначала сохраните правки — подтверждается только актуальная версия.</span>}
       </div>}
     </>

@@ -79,8 +79,9 @@ export class Flows {
   }
   private async reset(t:Turn) {t.dlg=await this.domain.resetDialogue(t.ctx,{expectedRevision:t.dlg.revision},this.key(t,'reset'));return t.dlg;}
   async menu(t:Turn,prefix?:string,page=0) {
-    await this.go(t,'menu',{},{sessionId:null,previewId:null,roleplayId:null});
-    await this.say(t,prefix?`${prefix}\n\n${T.texts.menu}`:T.texts.menu,menuRows(page));
+    const saved=t.dlg.navigation.kind==='assessment'?t.dlg.navigation:NONE;
+    await this.go(t,'menu',{},{sessionId:null,previewId:null,roleplayId:null},saved);
+    await this.say(t,prefix?`${prefix}\n\n${T.texts.menu}`:T.texts.menu,[...menuRows(page),...(saved.kind==='assessment'?[[b('Продолжить тест','ast'),b('Сбросить тест','asr')]]:[])]);
   }
 
   /** Definite domain outcome → user-facing text. Transient failures are rethrown so the update is retried, not acknowledged. */
@@ -176,6 +177,12 @@ export class Flows {
     pick:(t,arg)=>{const d=t.dlg.draft;const mode=arg as Mode;if(!ORDER[mode])return this.say(t,T.texts.stale);
       return this.compose(t,mode==='understand'?{mode,...(d.message?{message:d.message}:{})}:{mode,...(d.draft?{draft:d.draft}:{})},true);},
     exs:(t,id)=>this.pickExample(t,id),
+    ast:t=>this.resumeAssessment(t),
+    asr:t=>t.dlg.navigation.kind==='assessment'?this.say(t,'Сбросить сохранённые ответы теста? Это отдельное действие.',[[b('Да, сбросить тест','asx'),b('Нет, продолжить','ast')]]):this.say(t,T.texts.stale),
+    asx:async t=>{if(t.dlg.navigation.kind!=='assessment')return this.say(t,T.texts.stale);t.dlg=await this.domain.resetDialogue(t.ctx,{expectedRevision:t.dlg.revision,confirmation:'DISCARD_UNFINISHED_ASSESSMENT'},this.key(t,'discard_assessment'));return this.menu(t,'Ответы теста сброшены.');},
+    te:async(t,id)=>{const turn=t.dlg.draft.turns?.find(v=>v.id===id);if(t.dlg.step!=='compose'||t.dlg.draft.mode!=='thread'||!turn)return this.say(t,T.texts.stale);await this.go(t,'compose',t.dlg.draft,{},{kind:'thread_turn',speaker:turn.speaker,turnId:id});return this.say(t,'Пришли новый текст выбранной реплики. Порядок и её ID сохранятся.');},
+    tu:(t,id)=>this.moveTurn(t,id,-1),
+    td:(t,id)=>this.moveTurn(t,id,1),
     // composer
     ct:(t,arg)=>CONTEXTS.includes(arg as Ctx)&&t.dlg.step==='compose'?this.compose(t,{...t.dlg.draft,contextType:arg as Ctx}):this.say(t,T.texts.stale),
     g:(t,arg)=>GOALS.includes(arg as GoalValue)&&t.dlg.step==='compose'?this.compose(t,{...t.dlg.draft,goal:arg as GoalValue}):this.say(t,T.texts.stale),
@@ -421,6 +428,11 @@ export class Flows {
   }
 
   // ---------- menu
+  private async moveTurn(t:Turn,id:string,delta:number){
+    const turns=[...(t.dlg.draft.turns??[])],at=turns.findIndex(v=>v.id===id),to=at+delta;
+    if(t.dlg.step!=='compose'||t.dlg.draft.mode!=='thread'||at<0||to<0||to>=turns.length)return this.say(t,T.texts.stale);
+    [turns[at],turns[to]]=[turns[to]!,turns[at]!];return this.compose(t,{...t.dlg.draft,turns});
+  }
   private async menuAction(t:Turn,arg:string) {
     switch(arg){
       case 'u':return this.compose(t,{mode:'understand'},true);
@@ -465,7 +477,7 @@ export class Flows {
     if(d.mode==='thread'&&!k){
       const turns=d.turns??[];
       const shown=turns.map((x,n)=>`${n+1}. ${x.speaker==='self'?'Я':'Собеседник'}: ${T.shortTitle(x.text,120)}`).join('\n');
-      return this.say(t,`Ветка переписки (до ${T.limits.turns} реплик). Добавляй реплики по порядку.\n\n${shown||'Пока пусто.'}\n\n${T.texts.privacyHint}`,[[b('+ Моя реплика','sp','self'),b('+ Реплика собеседника','sp','other')],...(turns.length?[[b('Удалить последнюю','tdel'),b('Готово','tdone')]]:[]),cancel]);
+      return this.say(t,`Ветка переписки (до ${T.limits.turns} реплик). Добавляй реплики по порядку.\n\n${shown||'Пока пусто.'}\n\n${T.texts.privacyHint}`,[[b('+ Моя реплика','sp','self'),b('+ Реплика собеседника','sp','other')],...turns.map((turn,index)=>[b('Изменить '+(index+1),'te',turn.id),...(index>0?[b('↑ '+(index+1),'tu',turn.id)]:[]),...(index<turns.length-1?[b('↓ '+(index+1),'td',turn.id)]:[])]),...(turns.length?[[b('Удалить последнюю','tdel'),b('Готово','tdone')]]:[]),cancel]);
     }
     if(!k){
       if(d.mode==='understand')return this.toGuess(t,d);
@@ -498,6 +510,7 @@ export class Flows {
       if(!speaker)return this.say(t,'Сначала выбери, чья это реплика: «+ Моя реплика» или «+ Реплика собеседника».');
       if(text.length>T.limits.text)return this.say(t,T.tooLong(T.limits.text,text.length));
       const turns=d.turns??[];
+      if(nav.kind==='thread_turn'&&nav.turnId){const index=turns.findIndex(v=>v.id===nav.turnId);if(index<0)return this.say(t,T.texts.stale);return this.compose(t,{...d,turns:turns.map((v,i)=>i===index?{...v,text,speaker}:v)});}
       if(turns.length>=T.limits.turns)return this.say(t,`Не больше ${T.limits.turns} реплик. Нажми «Готово».`);
       return this.compose(t,{...d,turns:[...turns,{id:intentKey(t.intent,'turn',turns.length),speaker,text}]});
     }
@@ -697,6 +710,8 @@ export class Flows {
     const nav=t.dlg.navigation;if(nav.kind!=='assessment')return this.say(t,T.texts.stale,menuRows());
     const form=await this.domain.assessment(t.ctx,{kind:nav.assessmentKind});
     if(form.id!==nav.assessmentId||form.contentVersion!==nav.contentVersion||form.submittedAt)return this.startAssessment(t,nav.assessmentKind);
+    if(t.dlg.step!=='assessment')await this.go(t,'assessment',{},{},nav);
+    if(nav.answers.length===form.tasks.length){const result=await this.domain.submitAssessment(t.ctx,{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:t.dlg.revision,answers:nav.answers},this.key(t,'assessment'));return this.menu(t,T.assessmentResult(result));}
     await this.say(t,`Тест продолжается: сохранено ответов ${nav.answers.length} из ${form.tasks.length}. Выбери вариант кнопкой.`);
     return this.askTask(t,form,nav.answers.length);
   }

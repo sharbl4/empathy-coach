@@ -3,6 +3,7 @@ import type {z} from 'zod';
 import type {AssessmentForm,AssessmentResult} from '@between/contracts/product';
 import {Link,navigate} from '../../app/router';
 import {Button,Loading,Notice,TextArea} from '../../components/ui';
+import {Modal} from '../../components/Modal';
 import {api,errorText,isApiError,newKey} from '../../lib/api';
 import {skillLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
@@ -67,6 +68,7 @@ function Assessment() {
   const [kind,setKind]=useState<'baseline'|'followup'|null>(null);
   const [form,setForm]=useState<Form|null>(null);const [answers,setAnswers]=useState<Record<string,string>>({});
   const [dialogue,setDialogue]=useState<Dialogue|null>(null);
+  const [discard,setDiscard]=useState(false);
   const [result,setResult]=useState<Result|null>(null);const [error,setError]=useState<string|null>(null);const [busy,setBusy]=useState(false);
   const key=useState(newKey)[0];
   const results=useAsync(signal=>api('assessmentResults',{limit:10},{signal}),[result]);
@@ -87,6 +89,7 @@ function Assessment() {
   const submit=async()=>{if(!form||!dialogue)return;setBusy(true);setError(null);
     try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:dialogue.revision,answers:ordered(form,answers)},{key}));recordStage('assessment_completed');setForm(null);}
     catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново.':errorText(e));}finally{setBusy(false);}};
+  const reset=async()=>{if(!dialogue)return;setBusy(true);setError(null);try{setDialogue(await api('resetDialogue',{expectedRevision:dialogue.revision,confirmation:'DISCARD_UNFINISHED_ASSESSMENT'},{key:newKey()}));setAnswers({});setForm(null);setDiscard(false);}catch(e){setError(errorText(e));}finally{setBusy(false);}};
   return (
     <section className="card" aria-label="Тест до и после">
       <h2>Тест до/после</h2>
@@ -97,7 +100,9 @@ function Assessment() {
       {form&&!form.submittedAt&&<form className="grid-form" onSubmit={e=>{e.preventDefault();void submit();}}>
         {form.tasks.map((t,n)=><fieldset key={t.id}><legend>{n+1}. {t.prompt}</legend><div className="choice-grid">{t.choices.map(c=><label key={c.id} className={`choice${answers[t.id]===c.id?' choice-on':''}`}><input type="radio" name={t.id} checked={answers[t.id]===c.id} onChange={()=>void choose(t.id,c.id)}/><span>{c.text}</span></label>)}</div></fieldset>)}
         <Button type="submit" busy={busy} disabled={form.tasks.some(t=>!answers[t.id])}>Отправить ответы</Button>
+        <Button type="button" variant="secondary" disabled={busy} onClick={()=>setDiscard(true)}>Сбросить тест</Button>
       </form>}
+      <Modal open={discard} title="Сбросить ответы теста?" onClose={()=>setDiscard(false)} actions={<><Button variant="secondary" onClick={()=>setDiscard(false)}>Продолжить тест</Button><Button busy={busy} onClick={()=>void reset()}>Да, сбросить тест</Button></>}><p>Сохранённые ответы будут удалены только после подтверждения.</p></Modal>
       {result&&<Notice tone="success" title="Результат"><ol>{result.scores.map(s=><li key={s.questionId}>{s.score}/2 — {s.rationale}</li>)}</ol><p>{result.notice}.</p>{result.followupEligibleAt&&<p>Повторный тест будет доступен с {new Date(result.followupEligibleAt).toLocaleDateString('ru-RU')}. Напоминание — только если включите его в настройках.</p>}</Notice>}
       {results.data&&results.data.items.length>0&&<><h3>Прошлые результаты</h3><ul>{results.data.items.map(r=><li key={r.id}>{r.kind==='baseline'?'Входной':'Повторный'} · {new Date(r.completedAt).toLocaleDateString('ru-RU')}: {r.scores.map(s=>s.score).join(' · ')}</li>)}</ul></>}
     </section>

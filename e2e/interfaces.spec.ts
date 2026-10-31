@@ -29,8 +29,9 @@ test('link landing: fragment cleared at once, GET and reload do not redeem, a us
   await expect(page.getByText('Ссылка неполная или уже открыта в этой вкладке',{exact:false})).toBeVisible();
   expect(PublicWebSession.parse(await(await page.request.get('/api/auth/session')).json()).authenticated).toBe(false);
   // The same link in a fresh tab still works once…
-  await page.goto(link.webUrl);await page.getByRole('button',{name:'Подтвердить вход',exact:true}).click();
-  await expect(page.getByRole('link',{name:'История',exact:true})).toBeVisible();
+  const freshPage=await page.context().newPage();
+  await freshPage.goto(link.webUrl);await freshPage.getByRole('button',{name:'Подтвердить вход',exact:true}).click();
+  await expect(freshPage.getByRole('link',{name:'История',exact:true})).toBeVisible();
   // …and a second browser cannot redeem it again.
   const other=await browser.newContext();const otherPage=await other.newPage();
   try{
@@ -77,6 +78,11 @@ test('preview: masked snapshot of all fields, edit makes a new revision, nothing
   await expect(page.getByText(/версия предпросмотра 2/)).toBeVisible();
   await expect(page.locator('body')).not.toContainText('me@example.com');
   await expect(page.getByRole('button',{name:'Отправить в модель',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  const useful=page.getByRole('button',{name:'Полезно',exact:true});await useful.click();await expect(useful).toHaveAttribute('aria-pressed','true');
+  await page.reload();await expect(page.getByRole('button',{name:'Полезно',exact:true})).toHaveAttribute('aria-pressed','true');
+  await page.getByRole('button',{name:'Не полезно',exact:true}).click();await expect(page.getByRole('button',{name:'Не полезно',exact:true})).toHaveAttribute('aria-pressed','true');
+  await page.reload();await expect(page.getByRole('button',{name:'Не полезно',exact:true})).toHaveAttribute('aria-pressed','true');
 });
 
 test('logout: the cookie session ends, API is closed, refresh shows no history',async({page})=>{
@@ -145,6 +151,10 @@ test('assessment answers are saved after each choice and restored after reload',
   await first.check();await page.waitForTimeout(500);
   await page.reload();await page.getByRole('button',{name:'Входной тест',exact:true}).click();
   await expect(page.locator('fieldset').first().getByRole('radio').first()).toBeChecked();
+  await page.getByRole('link',{name:'История',exact:true}).click();await page.getByRole('link',{name:'Практика',exact:true}).click();await page.getByRole('button',{name:'Входной тест',exact:true}).click();await expect(page.locator('fieldset').first().getByRole('radio').first()).toBeChecked();
+  await page.getByRole('button',{name:'Сбросить тест',exact:true}).click();await page.getByRole('button',{name:'Продолжить тест',exact:true}).click();await expect(page.locator('fieldset').first().getByRole('radio').first()).toBeChecked();
+  await page.getByRole('button',{name:'Сбросить тест',exact:true}).click();await page.getByRole('button',{name:'Да, сбросить тест',exact:true}).click();await expect(page.getByRole('dialog')).not.toBeVisible();
+  await page.getByRole('button',{name:'Входной тест',exact:true}).click();await expect(page.locator('fieldset').first().getByRole('radio').first()).not.toBeChecked();
 });
 
 test('support region is an explicit stored choice that can be cleared',async({page})=>{

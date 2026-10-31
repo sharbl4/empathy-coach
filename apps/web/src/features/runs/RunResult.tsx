@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import type {z} from 'zod';
 import type {Preview,RunV2} from '@between/contracts/product';
 import {Highlighted,type Span} from '../../components/Highlighted';
@@ -81,9 +81,10 @@ export function RunResult({run,preview}:{run:Done;preview?:Pv|null}) {
 }
 
 /** Own-run usefulness vote; changing the value updates the same vote, double clicks do not add one. */
-export function Usefulness({runId}:{runId:string}) {
-  const [value,setValue]=useState<'useful'|'not_useful'|null>(null);
+export function Usefulness({runId,myRating}:{runId:string;myRating?:'useful'|'not_useful'|null}) {
+  const [value,setValue]=useState<'useful'|'not_useful'|null>(myRating??null);
   const [error,setError]=useState<string|null>(null);
+  useEffect(()=>setValue(myRating??null),[runId,myRating]);
   const vote=async(next:'useful'|'not_useful')=>{
     setError(null);
     try{const v=await api('rateRun',{runId,value:next},{key:newKey()});setValue(v.value);}catch(e){setError(errorText(e));}

@@ -58,7 +58,7 @@ export function ComposePage() {
     relationship,context,contextType,goal,turns:mode==='thread'?turns:undefined,guess:mode==='understand'||mode==='thread'?{emotions:unsure?[]:emotions.split(',').map(x=>x.trim()).filter(Boolean).slice(0,3),quotes:unsure?[]:quotes,unsure}:undefined});
   // Debounced save of the draft into the shared dialogue; a concurrent change from the bot is shown, not overwritten.
   useEffect(()=>{
-    if(!dialogue.current||conflict)return;
+    if(!dialogue.current||conflict||busy)return;
     const timer=window.setTimeout(()=>{
       const d=currentDraft(),current=dialogue.current;if(!d||!current)return;
       saveDialogue(current,{step:'compose',draft:d}).then(next=>{dialogue.current=next;setSaveError(null);},error=>{
@@ -67,7 +67,7 @@ export function ComposePage() {
       });
     },800);
     return ()=>window.clearTimeout(timer);
-  },[mode,message,draft,intent,relationship,context,contextType,goal,turns,emotions,quotes,unsure,title,conflict]);
+  },[mode,message,draft,intent,relationship,context,contextType,goal,turns,emotions,quotes,unsure,title,conflict,busy,loaded.data]);
   const sources=mode==='thread'?turns.map(t=>t.text):[message];
   const guessable=mode==='understand'||mode==='thread';
   const addQuote=()=>{const v=quote.trim();if(!v)return;if(!sources.some(s=>s.includes(v))){setError('Такой цитаты нет в тексте — скопируйте слова точно.');return;}setError(null);if(!quotes.includes(v)&&quotes.length<3)setQuotes([...quotes,v]);setQuote('');};

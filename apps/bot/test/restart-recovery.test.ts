@@ -4,6 +4,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Harness} from './harness.js';
 
+test('2.2.1 menu keeps test answers; continue accepts the next answer; discard asks for confirmation',async()=>{
+  const h=new Harness();await h.register();await h.message('/menu');await h.click('Ещё →');await h.click('Тест до/после');await h.click('Входной тест');await h.click('1');
+  await h.message('/menu');assert.ok(h.last().buttons.some(b=>b.text==='Продолжить тест'));
+  const restarted=new Harness(h.domain);await restarted.callback(h.button('Продолжить тест'));assert.match(restarted.lastText(),/Задание 2 из 3/);await restarted.click('2');assert.match(restarted.lastText(),/Задание 3 из 3/);
+  await restarted.message('/menu');await restarted.click('Сбросить тест');assert.ok(restarted.last().buttons.some(b=>b.text==='Да, сбросить тест'));await restarted.click('Нет, продолжить');assert.match(restarted.lastText(),/Задание 3 из 3/);
+  await restarted.message('/menu');await restarted.click('Сбросить тест');await restarted.click('Да, сбросить тест');assert.match(restarted.lastText(),/Ответы теста сброшены/);
+});
+
+test('2.2.1 thread edit survives restart; reorder keeps stable turn IDs',async()=>{
+  const h=new Harness();await h.register();await h.message('/menu');await h.click('Ветка переписки');await h.message('Сестра');await h.click('Близкие');await h.click('Пропустить');await h.click('Уточнить');await h.click('+ Реплика собеседника');await h.message('Первая');await h.click('+ Моя реплика');await h.message('Вторая');
+  await h.click('Изменить 1');const restarted=new Harness(h.domain);await restarted.message('Исправлена');assert.match(restarted.lastText(),/Исправлена/);
+  await restarted.click('↓ 1');assert.match(restarted.lastText(),/1\. Я: Вторая/);assert.match(restarted.lastText(),/2\. Собеседник: Исправлена/);
+  await restarted.click('↑ 2');assert.match(restarted.lastText(),/1\. Собеседник: Исправлена/);
+});
+
 async function toPreview(h:Harness,message='Ок. Позвони: +7 999 123-45-67') {
   await h.message('/menu');await h.click('Понять сообщение');
   await h.message(message);await h.message('Друг');

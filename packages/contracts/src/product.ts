@@ -1,7 +1,7 @@
 /** Web + Telegram boundary v2. This replaces transport-specific v1 DTOs for new code. */
 import {z} from 'zod';
 import {Id,Goal,Revision} from './index.js';
-import {Account,AccountPatch,EmailRequest,EmailVerification,EmailChallenge,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,UpdateCursor,UpdateReceipt,DeliveryFailure,DomainFailure,type UserContext,isPrivateModelUrl} from './domain.js';
+import {Account,AccountPatch,EmailRequest,EmailVerification,EmailChallenge,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,UpdateCursor,UpdateReceipt,DeliveryFailure,type UserContext,isPrivateModelUrl} from './domain.js';
 export const PRODUCT_CONTRACT_VERSION='2.0.0';
 const text=(max=3000)=>z.string().trim().min(1).max(max);
 const date=z.iso.date(),instant=z.iso.datetime();
@@ -76,7 +76,7 @@ function runVariant<K extends keyof typeof modelOutputsV2>(kind:K){return z.disc
 export const RunV2=z.union([runVariant('analysis'),runVariant('say_direct'),runVariant('before_send'),runVariant('reply_feedback'),runVariant('reply_examples'),runVariant('clarify'),runVariant('exercise'),runVariant('exercise_feedback'),runVariant('roleplay_start'),runVariant('roleplay_turn'),runVariant('roleplay_feedback'),runVariant('card_feedback')]);
 export const RunAcceptedV2=z.strictObject({runId:Id,resourceId:Id.optional()});
 export const RoleplayV2=z.strictObject({id:Id,sessionId:Id,revision:Revision,difficulty:Difficulty,status:z.enum(['active','completed']),turnCount:z.number().int().min(0).max(3),messages:z.array(z.strictObject({id:Id,sequence:z.number().int().nonnegative(),role:z.enum(['user','assistant']),content:text()})).max(7),feedback:RoleFeedback.nullable()});
-export const SessionDetailV2=SessionV2.extend({runs:z.array(RunV2).max(1000),roleplays:z.array(RoleplayV2).max(100)});
+export const SessionDetailV2=SessionV2.extend({runs:PageOf(RunV2),roleplays:PageOf(RoleplayV2)});
 export const Example=z.strictObject({id:text(100),version:text(100),input:SessionInputV2});
 export const Timezone=text(100).refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true;}catch{return false;}});
 export const Clock=z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/);
@@ -99,6 +99,8 @@ export const OperationalAnalytics=z.strictObject({events:z.array(z.strictObject(
 export const Support=z.strictObject({countryCode:z.string().regex(/^[A-Z]{2}$/),region:text(100).nullable(),message:text(),recognitionGuaranteed:z.literal(false),contacts:z.array(z.strictObject({label:text(200),phone:text(100).nullable(),url:z.url().nullable(),sourceUrl:z.url(),verifiedAt:instant})).max(10)});
 export const ProductErrorCode=z.enum(['VALIDATION_ERROR','UNAUTHORIZED','FORBIDDEN','CSRF_FAILED','ORIGIN_FORBIDDEN','EMAIL_NOT_VERIFIED','CONSENT_REQUIRED','CODE_INVALID','CODE_EXPIRED','NOT_FOUND','REVISION_CONFLICT','PREVIEW_STALE','PREVIEW_NOT_CONFIRMED','INPUT_TOO_LARGE','IDEMPOTENCY_CONFLICT','OPERATION_IN_PROGRESS','RATE_LIMITED','LINK_EXPIRED','LINK_ALREADY_USED','ACCOUNT_CONFLICT','ASSESSMENT_NOT_DUE','DEPENDENCY_UNAVAILABLE','INTERNAL_ERROR']);
 export const ProductError=z.strictObject({error:z.strictObject({code:ProductErrorCode,requestId:text(100),retryAfterSeconds:z.number().int().nonnegative().optional()})});
+export const DomainFailure=z.strictObject({code:ProductErrorCode,requestId:text(100),retryAfterSeconds:z.number().int().nonnegative().optional()});
+export type DomainFailure=z.infer<typeof DomainFailure>;
 type Schema=z.ZodType;
 const read=<I extends Schema,O extends Schema>(input:I,response:O)=>({input,response,mutable:false as const});
 const write=<I extends Schema,O extends Schema>(input:I,response:O)=>({input,response,mutable:true as const});
@@ -107,9 +109,10 @@ export const operations={
   requestEmailCode:write(EmailRequest,EmailChallenge),verifyEmailCode:write(EmailVerification,Account),
   dialogue:read(Empty,DialogueV2),updateDialogue:write(DialoguePatch,DialogueV2),resetDialogue:write(z.strictObject({expectedRevision:Revision}),DialogueV2),
   createSession:write(SessionInputV2,SessionV2),sessions:read(HistoryQuery,SessionPageV2),session:read(Resource,SessionDetailV2),updateSession:write(UpdateSessionV2,SessionV2),
-  deleteSession:write(Resource,z.null()),deleteData:write(z.strictObject({confirmation:z.literal('DELETE_MY_LEARNING_DATA')}),z.null()),deleteAccount:write(z.strictObject({confirmation:z.literal('DELETE_MY_ACCOUNT')}),z.null()),
+  deleteSession:write(Resource.extend({expectedRevision:Revision}),z.null()),deleteData:write(z.strictObject({confirmation:z.literal('DELETE_MY_LEARNING_DATA')}),z.null()),deleteAccount:write(z.strictObject({confirmation:z.literal('DELETE_MY_ACCOUNT')}),z.null()),
   createPreview:write(PreviewSource,Preview),preview:read(Resource,Preview),editPreview:write(EditPreview,Preview),confirmPreview:write(ConfirmPreview,PreviewReceipt),
   startRun:write(StartRun,RunAcceptedV2),run:read(Resource,RunV2),retry:write(z.strictObject({id:Id,previewId:Id,previewRevision:Revision,expectedRevision:Revision}),RunAcceptedV2),
+  runs:read(PageQuery.extend({sessionId:Id}),PageOf(RunV2)),roleplays:read(PageQuery.extend({sessionId:Id}),PageOf(RoleplayV2)),roleplay:read(Resource,RoleplayV2),
   examples:read(PageQuery.extend({contextType:ContextType.optional()}),PageOf(Example)),example:read(z.strictObject({id:text(100)}),Example),
   progress:read(Empty,ProgressV2),skillAttempts:read(PageQuery.extend({skill:Skill.optional()}),PageOf(SkillAttempt)),
   dailyPractice:read(Empty,Practice),completeDailyPractice:write(CompleteContent,Completion),
@@ -141,10 +144,14 @@ export type BrowserContext=Readonly<{[browserBrand]:true}>;
 export interface BrowserAccess {context:BrowserContext;setBindingCookie?:string;publicSession:z.infer<typeof PublicWebSession>;}
 export interface ConsumedWebLink {context:UserContext;setSessionCookie:string;publicSession:z.infer<typeof PublicWebSession>;}
 export interface PollerLease {readonly signal:AbortSignal;release():Promise<void>;}
-export interface Delivery {readonly id:string;readonly context:UserContext;readonly run:z.infer<typeof RunV2>;readonly attempt:number;}
+export const ReminderNotification=z.strictObject({kind:z.literal('daily_practice'),practiceId:text(100),contentVersion:text(100),localDate:date,title:text(200)});
+export type Delivery=Readonly<{id:string;context:UserContext;attempt:number}&(
+  {kind:'run';run:z.infer<typeof RunV2>}|{kind:'reminder';notification:z.infer<typeof ReminderNotification>}
+)>;
 export interface ProductLifecycle {
   readonly shutdownSignal:AbortSignal;
   start():Promise<void>;
+  stopAccepting():Promise<void>;
   close():Promise<void>;
   acquirePollerLease(botId:string):Promise<PollerLease>;
   resolveUser(identity:z.infer<typeof PrivateTelegramIdentity>):Promise<UserContext>;
@@ -155,7 +162,7 @@ export interface ProductLifecycle {
   consumeWebLink(browser:BrowserContext,id:string,key:string):Promise<ConsumedWebLink>;
   inspectWebLink(ctx:UserContext,claimCode:string,key:string):Promise<z.infer<typeof WebLinkStart>>;
   approveWebLink(ctx:UserContext,input:{id:string;decision:'approve'|'deny'},key:string):Promise<z.infer<typeof WebLink>>;
-  webSessions(ctx:UserContext):Promise<z.infer<typeof WebSessionPage>>;
+  webSessions(ctx:UserContext,input:z.infer<typeof PageQuery>):Promise<z.infer<typeof WebSessionPage>>;
   revokeWebSession(ctx:UserContext,id:string,key:string):Promise<void>;
   revokeCurrentWebSession(ctx:UserContext,key:string):Promise<void>;
   revokeAllWebSessions(ctx:UserContext,key:string):Promise<void>;
@@ -170,8 +177,10 @@ export interface ProductLifecycle {
 export type ProductFacade=UserMethods&ProductLifecycle;
 export interface ProductOptions {databaseUrl:string;ai:{provider:'local';baseUrl:string;model:string;apiKey?:string;timeoutMs:number;maxConcurrency:1;maxQueueLength:number};smtp:{host:string;port:number;user?:string;password?:string;from:string};emailCodeSecret:string;web:{origin:string;sessionSecret:string;linkSecret:string;telegramBotUsername:string};}
 export type CreateProductDomain=(options:ProductOptions)=>Promise<ProductFacade>;
-export interface TelegramTransport {identify():Promise<{botId:string;username:string}>;start(domain:ProductFacade,lease:PollerLease):Promise<void>;stop():Promise<void>;readonly finished:Promise<void>;}
+export interface TelegramTransport {identify():Promise<{botId:string;username:string}>;start(domain:ProductFacade,lease:PollerLease):Promise<void>;stop():Promise<void>;health():{polling:boolean};readonly finished:Promise<void>;}
 export type CreateTelegramTransport=(options:{token:string})=>TelegramTransport;
+export interface HttpAdapter {listen():Promise<void>;close():Promise<void>;health():{listening:boolean};}
+export type CreateHttpAdapter=(options:{domain:ProductFacade;origin:string;port:number;host:string;webRoot:string;trustedProxyIPs:string[];environment:'development'|'test'|'production'})=>Promise<HttpAdapter>;
 export const RuntimeHealth=z.strictObject({pid:z.number().int().positive(),heartbeatAt:instant,database:z.boolean(),http:z.boolean(),polling:z.boolean(),workers:z.boolean(),scheduler:z.boolean()});
 export const RuntimeEnvironmentV2=z.object({NODE_ENV:z.enum(['development','test','production']).default('development'),DATABASE_URL:z.url(),TELEGRAM_BOT_TOKEN:text(200),AI_PROVIDER:z.literal('local'),LOCAL_LLM_BASE_URL:z.url(),LOCAL_LLM_MODEL:text(200),LOCAL_LLM_API_KEY:z.string().optional(),AI_TIMEOUT_MS:z.coerce.number().int().min(1000).max(300000).default(90000),AI_MAX_CONCURRENCY:z.coerce.number().int().min(1).max(1).default(1),AI_MAX_QUEUE_LENGTH:z.coerce.number().int().min(1).max(20).default(8),SMTP_HOST:text(253),SMTP_PORT:z.coerce.number().int().min(1).max(65535).default(587),SMTP_USER:z.string().optional(),SMTP_PASSWORD:z.string().optional(),SMTP_FROM:z.email(),EMAIL_CODE_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),WEB_ORIGIN:z.url(),WEB_SESSION_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),WEB_LINK_SECRET:z.string().regex(/^[a-fA-F0-9]{64,}$/),PORT:z.coerce.number().int().min(1).max(65535).default(3000),TRUSTED_PROXY_IPS:z.string().default('')}).superRefine((value,ctx)=>{
   const origin=new URL(value.WEB_ORIGIN),production=value.NODE_ENV==='production';
@@ -179,7 +188,7 @@ export const RuntimeEnvironmentV2=z.object({NODE_ENV:z.enum(['development','test
   if(!isPrivateModelUrl(value.LOCAL_LLM_BASE_URL,production))ctx.addIssue({code:'custom',path:['LOCAL_LLM_BASE_URL'],message:'Private model endpoint required'});
   if(production&&(value.LOCAL_LLM_API_KEY?.length??0)<32)ctx.addIssue({code:'custom',path:['LOCAL_LLM_API_KEY'],message:'Strong endpoint key required'});
   if(new Set([value.EMAIL_CODE_SECRET,value.WEB_SESSION_SECRET,value.WEB_LINK_SECRET]).size!==3)ctx.addIssue({code:'custom',message:'Independent secrets required'});
-  if(value.TRUSTED_PROXY_IPS.split(',').filter(Boolean).some(part=>!/^([0-9]{1,3}\.){3}[0-9]{1,3}$/.test(part.trim())))ctx.addIssue({code:'custom',path:['TRUSTED_PROXY_IPS'],message:'Exact proxy IPs only; no wildcard, boolean or broad CIDR'});
+  if(value.TRUSTED_PROXY_IPS.split(',').filter(Boolean).some(part=>!/^([0-9]{1,3}\.){3}[0-9]{1,3}$/.test(part.trim())||part.trim().split('.').some(octet=>Number(octet)>255)))ctx.addIssue({code:'custom',path:['TRUSTED_PROXY_IPS'],message:'Exact proxy IPs only; no wildcard, boolean or broad CIDR'});
 });
 export function validateEvidenceV2(kind:keyof typeof modelOutputsV2,output:unknown,fields:ReadonlyArray<{id:string;value:string}>){
   const result=modelOutputsV2[kind].parse(output),sources=new Map(fields.map(field=>[field.id,field.value]));
@@ -187,5 +196,5 @@ export function validateEvidenceV2(kind:keyof typeof modelOutputsV2,output:unkno
   if(kind==='reply_feedback'||kind==='before_send'){for(const phrase of DraftFeedback.parse(result).phrases)if(!sources.get(phrase.fieldId)?.includes(phrase.quote))throw new Error('MODEL_INVALID_OUTPUT');}
   return result;
 }
-export {Id,Goal,Revision,Account,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId,DomainFailure};
+export {Id,Goal,Revision,Account,PrivateTelegramIdentity,TelegramUserId,TelegramUpdateId};
 export type {UserContext};

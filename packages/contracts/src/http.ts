@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {operations,type Operation,Empty,Id,PublicWebSession,WebLinkStart,WebLink,WebSessionPage,ProductError} from './product.js';
+import {operations,type Operation,Empty,Id,PageQuery,PublicWebSession,WebLinkStart,WebLink,WebSessionPage,ProductError} from './product.js';
 export const IdempotencyRequestHeaders=z.object({'idempotency-key':Id,'x-csrf-token':z.string().min(32).max(200)});
 export const WriteHeaders=z.object({'x-csrf-token':z.string().min(32).max(200)});
 function route<K extends Operation>(method:'GET'|'POST'|'PATCH'|'DELETE',path:string,operation:K){return {method,path,operation,auth:'server-session' as const,...operations[operation]};}
@@ -12,6 +12,7 @@ export const webApi={
   deleteData:route('DELETE','/api/account/data','deleteData'),deleteAccount:route('DELETE','/api/account','deleteAccount'),
   createPreview:route('POST','/api/previews','createPreview'),preview:route('GET','/api/previews/:id','preview'),editPreview:route('PATCH','/api/previews/:id','editPreview'),confirmPreview:route('POST','/api/previews/:id/confirm','confirmPreview'),
   startRun:route('POST','/api/runs','startRun'),run:route('GET','/api/runs/:id','run'),retry:route('POST','/api/runs/:id/retry','retry'),
+  runs:route('GET','/api/sessions/:sessionId/runs','runs'),roleplays:route('GET','/api/sessions/:sessionId/roleplays','roleplays'),roleplay:route('GET','/api/roleplays/:id','roleplay'),
   examples:route('GET','/api/examples','examples'),example:route('GET','/api/examples/:id','example'),
   progress:route('GET','/api/progress','progress'),skillAttempts:route('GET','/api/progress/attempts','skillAttempts'),
   dailyPractice:route('GET','/api/practice/today','dailyPractice'),completeDailyPractice:route('POST','/api/practice/complete','completeDailyPractice'),
@@ -26,7 +27,7 @@ export const authApi={
   webLinkStatus:{method:'GET',path:'/api/auth/web-links/:id',input:z.strictObject({id:Id}),response:WebLink},
   consumeWebLink:{method:'POST',path:'/api/auth/web-links/:id/consume',input:z.strictObject({id:Id}),response:PublicWebSession},
   logout:{method:'POST',path:'/api/auth/logout',input:Empty,response:z.null()},
-  sessions:{method:'GET',path:'/api/auth/sessions',input:Empty,response:WebSessionPage},
+  sessions:{method:'GET',path:'/api/auth/sessions',input:PageQuery,response:WebSessionPage},
   revokeSession:{method:'DELETE',path:'/api/auth/sessions/:id',input:z.strictObject({id:Id}),response:z.null()},
   revokeAllSessions:{method:'DELETE',path:'/api/auth/sessions',input:Empty,response:z.null()},
 } as const;

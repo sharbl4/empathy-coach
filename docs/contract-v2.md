@@ -41,3 +41,5 @@ startRun/retry принимают только подтверждённый owne
 ## Передача без внешних сообщений
 
 Согласование минимального checkpoint: Дима реализует Account/Browser binding/session/preview/run/history и корректный lifecycle; Даня импортирует /product и /http, строит web+bot на этих DTO. Дополнительные DTO раздела7 фиксируются сейчас; реализация всех функций обязательна до полной приёмки. Этот файл — локальный материал для сверки, не свидетельство, что Дима/Даня уже подтвердили контракт. По текущему указанию Антона внешние issues/комментарии/сообщения не отправляются.
+
+Lifecycle refinement: stopAccepting prevents new mutable work, HTTP/Telegram health expose actual listening/polling; lease.release and all close methods are idempotent even after domain.close. Session detail contains paginated runs/roleplays, dedicated list/read endpoints continue them; deleteSession requires expectedRevision. Web sessions list accepts PageQuery. Delivery is a discriminated run/reminder union; reminder payload is editorial daily practice metadata, never a forged successful run. Claim/delivery rechecks opt-in, localDate, quiet hours and account deletion/revocation.

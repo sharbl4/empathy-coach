@@ -1,4 +1,66 @@
-# Интеграция · этап 2 · 01.11.2026
+# Интеграция · этап 3 · 01.11.2026
+
+## Результат этапа 3
+
+Проверенная основа этапа2: **60ad5b8f7f661c15cb9cb34c5d780b8700528f91**, поверх candidate b9d7557/контракт2.2.1. Новая локальная ветка **test/integration-stage3**, worktree `.tools/stack-a1-nov01`. Добавленные acceptance-регрессии закоммичены: **f1b66116c303423e9811d962d59e68c9169779a7**; итоговую запись фиксирует следующий docs-only commit. Production-код, контракт, guards и миграции не менялись. Ничего не отправлялось на remote; merge/deploy/live не выполнялись.
+
+## Фактические проверки этапа 3
+
+Отдельный одноразовый контейнер PostgreSQL17.6-bookworm, loopback57351, разные `stage3_runtime`/`stage3_test`. Тестовая БД чистая перед обязательным набором; миграции выполняет настоящий harness. Node24.22.1/Playwright1.56.1; локальный Chrome157 через явный `PLAYWRIGHT_CHANNEL=chrome`, временные browser contexts. Корневой .env не читался и не копировался. Реальные domain/repositories/Fastify/PostgreSQL, закоммиченные явные test-only mail/model/Telegram adapters; незакоммиченных заглушек нет.
+
+| Проверка | Фактический результат |
+|---|---|
+| `npm test` на60ad5b8 | **43 contracts/root +90 domain/HTTP/bot/lifecycle PASS,0fail/0skip**; включает stage2 idempotency regression |
+| `node scripts/check-web-runtime.mjs` + `npm run e2e` | **Все13 PASS**, без фильтрации/skip; guards/CSRF/ownership не отключались |
+| Новые `domain-stage3-acceptance.test.ts` наf1b6611 | **3PASS,0fail/0skip**: deletion session/account во время генерации;3уровня роли с early feedback |
+| `npm run lint` и API typecheck после добавления теста | PASS; остальные typechecks из этапа2 не повторялись без изменения соответствующего кода |
+| `docker build -t between-stage3-check:local .` | PASS из чистого закоммиченного дереваf1b6611; внутри настоящий production build contracts→api/bot/web и browser runtime guard, затем prune dev |
+| Production image imports с `--network none` | PASS: createDomain/createHttpAdapter/createTelegramTransport доступны, процесс завершается без старта серверов; .env/test browser adapter/Supabase package отсутствуют; AUTH_BYPASS отвергается |
+| Runtime export под browser condition в image | PASS: ERR_PACKAGE_PATH_NOT_EXPORTED |
+| `node scripts/check-compose.mjs` | PASS: только proxy80/443, DB/model не публикуются, exact proxy trust, актуальный env schema; Compose не запускался |
+
+Образ: **sha256:14a127b0b67fbd457f28077b34bb0807e16a0dbfe07fd119d5f5d54b0d8d14de**, USER=node. Повторная сборка Docker необходима для поставки текущего закоммиченного дерева; отдельный host build из этапа2 не дублировался. После добавления3API-тестов повторены только они и их lint/typecheck; полный набор/13browser заново не запускались, потому что runtime/browser код не изменился. Всего проверено90+3 domain/transport tests, но это два отдельных запуска, не один93-test run.
+
+### Приоритетные свойства
+
+- **Ownership двух пользователей/auth/CSRF:** domain-issued contexts; поддельный context отвергается; чужие session/run IDs недоступны; реальные HTTP cookie exchange, one-time/replay/races/logout/revoke/expiry и missing Origin/CSRF. Browser проверяет чужие прямые URL/API и logout/reload.
+- **Показанный snapshot:** DB-тест navigation отвергает подтверждение не показанной/устаревшей версии, exact hash/revision и изменённые зависимости; browser проверяет masking, edit→revision2, запрет send до сохранения, подтверждение и test-model run.
+- **Идемпотентность/restart:** same/different intention races, scope user+operation, потеря ответа/рестарт, удалённый ресурс не воскресает; persistent dialogue/assessment/run/delivery и idempotent close/lease проверены настоящей БД. Browser refresh восстанавливает историю/черновик/vote.
+- **Удаление при генерации:** существующий DB-тест deleteData и новые session/account cases удерживают управляемую генерацию, удаляют данные, затем возвращают поздний output. Проверены отсутствие удалённого run, completion event и delivery, отсутствие утечки другому пользователю; следующий пользователь получает собственный результат. Удаление не освобождает физический permit до окончания незавершённого вызова.
+
+### Остальные функции по существующей приёмке
+
+Ниже перечислены проверенные действия/состояния, а не наличие кнопок. `domain` означает настоящий storage/FSM с явно тестовым модельным результатом, `bot` —тест транспорта без Telegram сети. Это не доказательство качества модели или полного web UX.
+
+| Объём раздела7 | Выполненное поведенческое доказательство | Граница |
+|---|---|---|
+| Аккаунт/онбординг | domain/web-product/bot: consent/email gate, challenge recovery/resend, verified state; cookie exchange/logout/revoke | Реальные email/Telegram не отправлялись |
+| Примеры/контексты | domain-product:8examples; bot:выбор примера→гипотеза→preview, history/example context filtering | Не все8 примеров прогнаны настоящей LLM |
+| Понять/своя гипотеза/основания | persisted analysis run, exact evidence quote/field validation, own guess или unsure; browser анализ→result | Качество трактовок/comparison тестовым output не подтверждается |
+| Сказать прямо/до отправки | domain-learning: оба draft-only режима создают успешные валидированные runs без вымышленного входящего сообщения; bot проходит сценарий | Сохранение смысла/отказа реальной моделью требует живой оценки |
+| Разбор фраз/цели ответа | domain-learning: reply_feedback/reply_examples через confirmed snapshots; bot проверяет tone words/details/examples и own attempt | Реальная корректность формулировок и интерактивная web-подсветка не покрыты13browser целиком |
+| Скрытие данных/ветка | mask email/phone и redaction provenance; shown snapshot; stale/oversize guards; bot edit/reorder/restart по stable turn IDs | Модельное качество и все web-редакторы отдельно не приняты |
+| Упражнение/навыки | exercise→attempt→feedback, две durable skill attempts с rubric; bot проходит попытку | Реальный полезный feedback не доказан |
+| Ролевая игра | domain-learning:3ответа/четвёртый запрещён; новые tests:calm/hurt/irritated и early finish после1ответа, before turn1 запрещён | Модель тестовая;3уровня поведения настоящей LLM не оценивались |
+| Практика дня/карточки/стрики | concurrent completion→один completion; localDate, count=1, best/current streak; card feedback persisted | Нет полного web UI прогона карточек/практики |
+| Напоминания | domain-learning: opt-in, DST gap/overlap, quiet hours, restart, local-date dedup, unsubscribe; bot delivery/settings | Реальная Telegram доставка/таймеры облака не проверены |
+| До/после | canonical partial answers→restart→atomic submit, чужая форма/неверный порядок запрещены, rubric2;7дней/followup через явные test clocks; browser menu/reload/confirmed discard | Реальный недельный период и эффект обучения не доказаны |
+| История/прогресс | domain/storage и bot:pagination/search/context filter/edit revision; counters unique; browser same-account history/reload и owner isolation | Не все фильтры/продолжения web проверены браузером |
+| Полезность/аналитика | owned myRating read after restart; browser useful→reload→not_useful→reload; domain aggregates один upsert vote, completion event только success | Нет внешней аналитики/психологических выводов |
+| Сложные ситуации | bot support branch вместо normal send; domain supportRegion explicit/revision, unknown/unavailable→contacts=[]; browser preference сохранена/сброшена | Актуальность телефонов/распознавание реальной моделью здесь не переаттестованы |
+| Удаление | отдельные session/data/account actions + поздний ответ; tombstone/revision/ownership; bot confirmations | Реальный phone/cloud сценарий не запускался |
+
+Первый запуск нового roleplay-теста не прошёл: тест пропустил обязательный предварительный анализ и ожидал неверный код при finish до первого ответа. Guard корректно отверг запрос. Исправлены только предусловия/assertion теста; затем3/3PASS, runtime-ошибкой это не объявляется. Старый единичный fail88-test набора в обязательном прогоне90 не воспроизведён; причина по-прежнему не установлена.
+
+## Пропуски, live-блокеры и остановка
+
+Полный audit PR/исходников, повтор legacy suite целиком, новый remote CI, live SMTP/Telegram/домашняя Gemma, QQCloud/HTTPS, network reconnect/offline/reboot, RAM/VRAM/TTFT/p50/p95, backup/restore и оценка качества полного раздела7 **не выполнялись**. Fixtures не засчитаны как генерация реальной LLM. Новых отправок писем/модельных запросов к внешним сервисам0.
+
+Для live нужны проверенные отдельные test bot/DB, серверные secrets/WEB_ORIGIN в env, app SMTP verification flow, доступ QQCloud→домашний private endpoint (ПК включён, ACL/firewall/direct-or-relay), реальный HTTPS/cookie origin/host process/disk и второй пользователь/телефон. Наличие этих доступов в этом этапе не проверялось.3moderate runtime advisories из npm prune сохраняются; auto-fix/смена стека не делались. Полная продуктовая приёмка не закрыта, хотя указанные локальные gates прошли.
+
+Этап3 завершён. Следующий шаг —отдельно разрешённая подготовка/проверка live окружения и закрытие отмеченных UI/качественных пробелов. PR не слиты/не закрыты, деплоя/публикации нет; .env/чужие изменения сохранены. Одноразовая DB после проверок останавливается.
+
+## Этап 2 — сохранённая запись
 
 ## Результат этапа 2
 

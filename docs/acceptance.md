@@ -17,4 +17,6 @@ Telegram-only/no-site gates заменены. Все27 строк docs/product.m
 - Измерены cloud RAM HTTP+polling+scheduler+DB/OS reserve, GPU VRAM,24 identical cases/model, cold/warm/local/cloud TTFT и total p50/p95/N/failed. Цель warm short≤5с без очереди проверяется, не обещается.
 - Backup/restore отдельной DB, миграции/старые данные сохранены, rollback, reconnect/reboot/PC sleep dependency, private network allow-cloud/deny-peer.
 
-Текущие блокеры: B1/B2 фасада/auth/http и C1/C2 новые web/bot не реализованы в этой ветке; старый web Auth ещё Supabase. QQCloud/SMTP/test bot/GPU PC/tailnet доступа нет. Реальный новый live N=0, метрики не измерены. Локальные схемы/test adapters не подтверждают live.
+Текущие блокеры: B1/B2 фасада/auth/http и C1/C2 новые web/bot не реализованы в этой ветке; старый web Auth ещё Supabase. QQCloud/test bot/GPU PC/tailnet для live не предоставлены. Отдельный SMTP AUTH235 и одна тестовая отправка с acceptance250 ранее проверены; app challenge flow и доставка в ящик этим не подтверждаются. Реальный новый live N=0, метрики не измерены. Локальные схемы/test adapters не подтверждают live.
+
+2.2 gates: browser production bundle without runtime schema markers; runtime import blocked under browser condition; restart/cross-interface restore of editable field/shown hash/thread speaker/card/assessment partial answers; TTL cleanup and stale conflicts; explicit support region + unknown=no contacts; durable max3 retry/unknown-terminal with actual DB and no ack on uncertain outcome.

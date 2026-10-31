@@ -9,3 +9,5 @@ Never log correspondence, model output, email, codes, cookies, auth URLs, tokens
 Preserve old data/migrations and other people's uncommitted changes. Root env/IDE files are not overwritten.
 Do not send team/user messages or modify external issues without explicit authorization. Local handoff is not peer acceptance.
 Run actual checks; report commit, skipped/blocked checks, live evidence and dependencies. CI/local adapters never prove Telegram/SMTP/QQCloud/GPU live.
+
+A1 2.2: runtime env/health validators only @between/contracts/runtime (browser export disabled); product/http may never transitively import runtime. Persistent navigation/assessment answers live in domain dialogue (idle1h/max24h), email challenge only emailVerification, support region only explicit account preference. Confirm the shown snapshot hash/revision, never silently fetch-and-confirm a newer one. See docs/contract-v2.2.md.

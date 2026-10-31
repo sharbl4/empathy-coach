@@ -20,3 +20,5 @@ Auth/preview/idempotency/inbox/outbox: [контракт v2](contract-v2.md). Д
 Shutdown/partial start: stop accepting, остановить polling/HTTP, abort/drain workers/model requests с лимитом, finally закрыть delivery/scheduler/leases/pool. Health учитывает HTTP/polling/workers/scheduler/DB, не требует доступной модели для чтения истории. Никаких raw URLs/cookies/payload в логах.
 
 QQCloud1CPU/2ГБ требует проверки постоянного процесса/диска/HTTPS; Telegram domain bot этого не доказывает. Начальные caps app640MiB, db512MiB, proxy64MiB оставляют~832MiB ОС, pool target5; не замер. Image собирается на ПК/CI, не VM. PG/model порты не опубликованы, proxy trust exact IP only. Модель слушает private IP, ACL+Windows firewall разрешают только cloud node.
+
+A1 2.2 boundary: @between/contracts/runtime server-only export, browser:null; no public re-export. Dialogue owns transient draft/navigation (idle1h,absolute24h); supportRegion account setting is separate and user-selected, not inferred. Full rules contract-v2.2.md.

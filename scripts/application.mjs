@@ -3,14 +3,15 @@ import {pathToFileURL} from 'node:url';
 import {resolve,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {writeFile,rename,unlink} from 'node:fs/promises';
-import {RuntimeEnvironmentV2,RuntimeHealth,TelegramUserId} from '@between/contracts/product';
+import {RuntimeEnvironment,RuntimeHealth} from '@between/contracts/runtime';
+import {TelegramUserId} from '@between/contracts/product';
 const {setInterval,clearInterval,setTimeout,clearTimeout}=globalThis;
 const isMain=process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href;
 export async function startApplication(environment=process.env,testFactories){
   if(testFactories&&(process.env.NODE_ENV!=='test'||environment.NODE_ENV!=='test'))throw new Error('Test adapters forbidden outside test');
   if(environment.NODE_ENV==='production'&&Object.entries(environment).some(([key,value])=>(/BYPASS|FIXTURE|TEST_ADAPTER|MOCK/.test(key)||key==='VITE_API_MODE')&&value&&!['0','false','http'].includes(value)))throw new Error('Production adapter flags forbidden');
   if(environment.NODE_TLS_REJECT_UNAUTHORIZED==='0')throw new Error('TLS bypass forbidden');
-  const config=RuntimeEnvironmentV2.parse(environment);
+  const config=RuntimeEnvironment.parse(environment);
   const factories=testFactories??{
     createDomain:(await import('@between/api')).createDomain,
     createHttpAdapter:(await import('@between/api/http')).createHttpAdapter,

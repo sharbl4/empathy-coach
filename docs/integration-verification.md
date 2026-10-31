@@ -1,3 +1,11 @@
+# Current A1 2.2 / PR21 review snapshot
+
+Contract a71d379b31c65167ef40ece6a384b7ee539bfdeb. Root tests39passed/0skipped; lint success; generated signatures checked. New test cases are schema/serialization/import/lifecycle checks, not DB persistence.
+PR21 d97ddf1: independently32bot unit tests pass (FakeProduct), original real production build fails env markers. Controlled runtime-only extraction on its own DTO base makes actual production bundle pass old and strengthened graph/artifact guard, no facade/http stubs. Full2.2 contracts expose bot/web type mismatches and missing API facade/HTTP. Separate negative probe: same update4unknown failures all retryable,0ack,0recordUpdateFailure; this reproduces old unbounded retry.
+During review PR22 9e87107 appeared: independently37bot unit tests pass on its committed2.1 (FakeProduct). Verified source corrections for email, shared error/receipt and hashes. Full2.2 overlay still fails bot/web typechecks on navigation/support/assessment. New instructions target22. Actual backend remote remains f9fc301/v1; real HTTP/browser adapter absent.
+No PG/Playwright/live Telegram/model tests executed: prerequisites absent, no skipped DB tests credited. SMTP prior separate AUTH+one accepted mail is retained evidence, no additional email or generation performed here. No .env/IDE/teammate work changed; review scratch worktrees under ignored .tools contain no copied .env and no backend stubs.
+
+---
 # A1 2.1 review update · 2026-10-31
 
 Contract commit a619dab87c06541256c9155ee6f00cdd021c2f0a; unified current branch feat/web-telegram-integration. Review source: review-pr19-pr20.md; exact contracts: facade-v2.1.md and contract-a1-resolution.md.

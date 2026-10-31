@@ -1,3 +1,5 @@
+> Current approved A1 2.2: [runtime/persistence/support rules](contract-v2.2.md), [exact signatures](facade-v2.2.md), [handoff](handoff-v2.md). This supersedes older signatures below where changed.
+
 > Current A1 protocol2.1.0: [exact signatures/endpoints](facade-v2.1.md), [email recovery/error/HTTP rules](contract-a1-resolution.md).
 
 # API v2: shared facade + session HTTP

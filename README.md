@@ -6,9 +6,9 @@
 
 ## Старт и контракт
 
-Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 2.1.0 —a619dab (31574f8 и первый draft88b83d3 заменены), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
+Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 2.2.0 —a71d379 (2.1/31574f8 заменены в указанных границах), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
 Полный обязательный [продукт](docs/product.md), [архитектура](docs/architecture.md), [приёмка](docs/acceptance.md).
-Код старого веба сохранён, но его Supabase-auth должен заменить Даня; до этого release guard не выдаёт его за рабочую новую авторизацию. Реальных domain/http/bot модулей пока нет; integration CI блокируется, а не исключается.
+PR21/22 переносит web/bot на общий домен; Supabase уже убран из их active src. В общей ветке эти PR пока не приняты: старый web сохранён, release guard продолжает блокировать его до успешного review. Реальных domain/http/bot модулей пока нет; integration CI блокируется, а не исключается.
 
 ```sh
 npm ci
@@ -30,3 +30,5 @@ Node24.22.1 LTS, npm workspaces TS/React/Vite/Fastify/Zod/pg. Contracts перв
 На этом рабочем ПК Intel Graphics/около16ГБ; RTX3070Ti/32ГБ — другой ПК владельца. Нет GPU/QQCloud/Tailscale access; N реальных новых inference0. Gemma3 4B Q4_K_M и Qwen3-4B-Instruct-2507 сравниваются после принятия владельцем условий и фактических замеров, не выбираются по обещанию5с.
 
 [Runbook](docs/runbook.md), [модель](docs/local-model.md), [локальная передача/оценка](docs/handoff-v2.md), [демо](docs/demo.md). Старые plans/legacy tests сохранены, но не описывают новый runtime.
+
+Server env validators только @between/contracts/runtime, browser export запрещён; /product и /http не импортируют runtime. [Новые persistent dialogue и support правила](docs/contract-v2.2.md), [review PR21/22](docs/review-pr21.md).

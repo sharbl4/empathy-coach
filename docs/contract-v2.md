@@ -1,3 +1,5 @@
+> Current approved A1 2.2: [runtime/persistence/support rules](contract-v2.2.md), [exact signatures](facade-v2.2.md), [handoff](handoff-v2.md). This supersedes older signatures below where changed.
+
 > A1 2.1.0: email/error/HTTP/preview/lifecycle additions and exact signatures supersede omissions below. See [resolution](contract-a1-resolution.md), [generated facade](facade-v2.1.md), [current handoff](handoff-v2.md).
 
 # Общий контракт web + Telegram v2 · A1

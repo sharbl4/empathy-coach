@@ -6,9 +6,9 @@
 
 ## Старт и контракт
 
-Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Новая ветка feat/web-telegram-integration. Текущий контракт A1 2.2.0 —a71d379 (2.1/31574f8 заменены в указанных границах), @between/contracts/product и /http, [контракт v2](docs/contract-v2.md).
+Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Текущий контракт A1 2.2.1 —9cd742f, @between/contracts/product и /http; [совместимое дополнение](docs/contract-v2.2.1.md). Общий исполняемый candidate `test/stack-a1-nov01`/6755408 включает backend fabed23 и interfaces f12d309. Точная передача: [handoff](docs/handoff-v2.md).
 Полный обязательный [продукт](docs/product.md), [архитектура](docs/architecture.md), [приёмка](docs/acceptance.md).
-PR21/22 переносит web/bot на общий домен; Supabase уже убран из их active src. В общей ветке эти PR пока не приняты: старый web сохранён, release guard продолжает блокировать его до успешного review. Реальных domain/http/bot модулей пока нет; integration CI блокируется, а не исключается.
+В candidate есть настоящие facade/HTTP/bot/web: общая сборка, PostgreSQL/HTTP и13 browser-сценариев проверены; Supabase отсутствует в активном клиенте и production dependencies. PR22/23 отдельно не слиты. Контрактная ветка без candidate не является полной исполняемой поставкой. Release guard и обязательные CI jobs сохранены; live Telegram/QQCloud/GPU этим не подтверждаются.
 
 ```sh
 npm ci

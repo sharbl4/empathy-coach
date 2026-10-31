@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {z} from 'zod';
 import {analysisFixture,assessmentFixture,cardFixture,directFixture,practiceFixture,reminderFixture} from '@between/contracts/product-fixtures';
-import {DomainError,UPDATE_MAX_ATTEMPTS,domainRetryPolicy,type Account,type Delivery,type DialogueV2,type DomainFailure,type EmailVerificationStatus,type Example,type Preview,type PreviewSource,type PrivateTelegramIdentity,type ProductFacade,type RoleplayV2,type RunV2,type SessionInputV2,type UserContext} from '@between/contracts/product';
+import {DialoguePatch,DomainError,UPDATE_MAX_ATTEMPTS,domainRetryPolicy,type Account,type Delivery,type DialogueV2,type DomainFailure,type EmailVerificationStatus,type Example,type Preview,type PreviewSource,type PrivateTelegramIdentity,type ProductFacade,type RoleplayV2,type RunV2,type SessionInputV2,type UserContext} from '@between/contracts/product';
 
 // TEST-ONLY implementation of the v2 ProductFacade (only what the transport calls). Never imported by src/.
 type Acc=z.infer<typeof Account>;type Dlg=z.infer<typeof DialogueV2>;type Input=z.infer<typeof SessionInputV2>;
@@ -146,19 +146,21 @@ export class FakeProduct {
   async deleteAccount(ctx:UserContext,input:unknown,key:string) {this.enter('deleteAccount',ctx);return this.once(ctx,key,input,()=>{for(const [id,s] of this.store)if(s.owner===ctx.accountId)this.store.delete(id);this.accounts.delete(ctx.accountId);this.dialogues.delete(ctx.accountId);return null;});}
 
   // ---- dialogue
-  private blank():Dlg {return {revision:1,step:'onboarding',draft:{},sessionId:null,previewId:null,roleplayId:null,pendingRunId:null};}
+  private blank():Dlg {const created=Date.now();return {revision:1,step:'onboarding',draft:{},navigation:{kind:'none'},sessionId:null,previewId:null,roleplayId:null,pendingRunId:null,createdAt:new Date(created).toISOString(),expiresAt:new Date(created+3600000).toISOString()};}
   async dialogue(ctx:UserContext) {this.enter('dialogue',ctx);return structuredClone(this.dialogues.get(ctx.accountId)??this.blank());}
-  async updateDialogue(ctx:UserContext,input:Omit<Dlg,'revision'|'pendingRunId'>&{expectedRevision:number},key:string) {
+  async updateDialogue(ctx:UserContext,input:Omit<Dlg,'revision'|'pendingRunId'|'createdAt'|'expiresAt'>&{expectedRevision:number},key:string) {
     this.enter('updateDialogue',ctx);
+    // The real contract schema: invalid step/navigation combinations fail here as they would in the domain.
+    if(!DialoguePatch.safeParse(input).success)fail('VALIDATION_ERROR');
     return this.once(ctx,key,input,()=>{
       const cur=this.dialogues.get(ctx.accountId)??this.blank();if(cur.revision!==input.expectedRevision)fail('REVISION_CONFLICT');
       if(input.sessionId)this.owned(ctx,input.sessionId);
       if(input.previewId){const p=this.previews.get(input.previewId);if(!p||p.owner!==ctx.accountId)fail('NOT_FOUND');}
       const {expectedRevision:_e,...rest}=input;void _e;
-      const next:Dlg={...structuredClone(rest),revision:cur.revision+1,pendingRunId:cur.pendingRunId};this.dialogues.set(ctx.accountId,next);return structuredClone(next);
+      const next:Dlg={...structuredClone(rest),revision:cur.revision+1,pendingRunId:cur.pendingRunId,createdAt:cur.createdAt,expiresAt:new Date(Date.now()+3600000).toISOString()};this.dialogues.set(ctx.accountId,next);return structuredClone(next);
     });
   }
-  async resetDialogue(ctx:UserContext,input:{expectedRevision:number},key:string) {return this.updateDialogue(ctx,{expectedRevision:input.expectedRevision,step:'menu',draft:{},sessionId:null,previewId:null,roleplayId:null},key);}
+  async resetDialogue(ctx:UserContext,input:{expectedRevision:number},key:string) {return this.updateDialogue(ctx,{expectedRevision:input.expectedRevision,step:'menu',draft:{},navigation:{kind:'none'},sessionId:null,previewId:null,roleplayId:null},key);}
 
   // ---- sessions
   async createSession(ctx:UserContext,input:Input,key:string) {
@@ -237,7 +239,21 @@ export class FakeProduct {
     return this.once(ctx,key,input,()=>{const run={...structuredClone(r!.run),id:randomUUID(),status:'pending',phase:'queued',queuePosition:1,output:null,errorCode:null} as Run;this.runs.set(run.id,{owner:ctx.accountId,run});return {runId:run.id};});
   }
   async rateRun(ctx:UserContext,input:{runId:string;value:string},key:string) {this.learning('rateRun',ctx);await this.run(ctx,{id:input.runId});return this.once(ctx,key,input,()=>{this.votes.set(`${ctx.accountId}:${input.runId}`,input.value);return input;});}
-  async support() {return {countryCode:'RU',region:null,message:'Похоже, может быть опасность. Обратись к человеку рядом или в местную экстренную службу.',recognitionGuaranteed:false as const,contacts:[]};}
+  region={countryCode:null as string|null,region:null as string|null,revision:1};
+  /** Verified contacts exist only for these test regions; no numbers otherwise. */
+  verifiedContacts:Record<string,{label:string;phone:string;sourceUrl:string}>={KZ:{label:'Тестовая линия поддержки',phone:'150',sourceUrl:'https://example.org/source'}};
+  async supportRegion(ctx:UserContext) {this.enter('supportRegion',ctx);return {...this.region};}
+  async updateSupportRegion(ctx:UserContext,input:{expectedRevision:number;countryCode:string|null;region:string|null},key:string) {
+    this.enter('updateSupportRegion',ctx);
+    return this.once(ctx,key,input,()=>{if(input.expectedRevision!==this.region.revision)fail('REVISION_CONFLICT');this.region={countryCode:input.countryCode,region:input.region,revision:this.region.revision+1};return {...this.region};});
+  }
+  supportCalls:unknown[]=[];
+  async support(ctx:UserContext,input:unknown) {
+    this.enter('support',ctx);this.supportCalls.push(input);
+    const c=this.region.countryCode,verified=c?this.verifiedContacts[c]:undefined;
+    return {countryCode:c,region:c?this.region.region:null,availability:!c?'region_required' as const:verified?'available' as const:'unavailable' as const,message:'Похоже, может быть опасность. Обратись к человеку рядом или в местную экстренную службу.',recognitionGuaranteed:false as const,
+      contacts:verified?[{label:verified.label,phone:verified.phone,url:null,sourceUrl:verified.sourceUrl,verifiedAt:now()}]:[]};
+  }
 
   // ---- catalogue content
   examplesList:z.infer<typeof Example>[]=[{id:'ok-close',version:'1',input:{mode:'understand',title:'«Ок.»',relationship:'Друг',context:'Ответ на длинное сообщение',contextType:'close',goal:'clarify',message:'Ок.',guess:{emotions:[],quotes:[],unsure:true}}}];
@@ -253,8 +269,9 @@ export class FakeProduct {
   async completeCard(ctx:UserContext,input:unknown,key:string) {this.learning('completeCard',ctx);return this.once(ctx,key,input,()=>({id:randomUUID(),contentId:cardFixture.id,contentVersion:cardFixture.contentVersion,localDate:'2026-10-31',completedAt:now()}));}
   assessmentSubmitted:string|null=null;
   async assessment(ctx:UserContext,q:{kind:'baseline'|'followup'}) {this.learning('assessment',ctx);if(q.kind==='followup')fail('ASSESSMENT_NOT_DUE');return {...structuredClone(assessmentFixture),submittedAt:this.assessmentSubmitted};}
-  async submitAssessment(ctx:UserContext,input:{id:string;answers:{questionId:string;choiceId:string}[]},key:string) {
+  async submitAssessment(ctx:UserContext,input:{id:string;expectedDialogueRevision:number;answers:{questionId:string;choiceId:string}[]},key:string) {
     this.learning('submitAssessment',ctx);
+    if(this.dialogues.get(ctx.accountId)?.revision!==input.expectedDialogueRevision)fail('REVISION_CONFLICT');
     return this.once(ctx,key,input,()=>{this.assessmentSubmitted=now();return {id:input.id,kind:'baseline' as const,scores:input.answers.map(a=>({questionId:a.questionId,score:a.choiceId==='a'?2:0,rationale:a.choiceId==='a'?'Ясный уважительный вопрос':'Обвинение без уточнения'})),completedAt:now(),followupEligibleAt:new Date(Date.now()+7*86400000).toISOString(),notice:'Учебный результат, не оценка эмпатии и не доказательство психологического эффекта' as const};});
   }
   async assessmentResults(ctx:UserContext) {this.learning('assessmentResults',ctx);return {items:[],nextCursor:null};}

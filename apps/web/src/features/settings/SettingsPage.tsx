@@ -4,7 +4,7 @@ import type {EmailVerificationStatus,ReminderSettings} from '@between/contracts/
 import {navigate} from '../../app/router';
 import {Modal} from '../../components/Modal';
 import {Button,Loading,Notice,TextField} from '../../components/ui';
-import {api,auth,errorText,newKey} from '../../lib/api';
+import {api,auth,errorText,isApiError,newKey} from '../../lib/api';
 import {formatDate} from '../../lib/labels';
 import {useSession} from '../../lib/session';
 import {useAsync} from '../../lib/useAsync';
@@ -79,6 +79,37 @@ function DisplayName({current}:{current:string}) {
   return <form className="row" onSubmit={e=>{e.preventDefault();void save();}}><TextField label="Как к вам обращаться" value={name} maxLength={100} onChange={e=>setName(e.target.value)}/><Button type="submit" variant="secondary" busy={busy} disabled={!name.trim()||name.trim()===current}>Сохранить</Button>{msg&&<Notice tone={msg.tone}>{msg.text}</Notice>}</form>;
 }
 
+const COUNTRIES:[string,string][]=[['RU','Россия'],['KZ','Казахстан'],['BY','Беларусь'],['UZ','Узбекистан'],['KG','Кыргызстан'],['AM','Армения']];
+
+/** Support region: explicit user choice stored by the domain; not derived from language, timezone or IP. */
+function SupportRegion() {
+  const loaded=useAsync(signal=>api('supportRegion',{},{signal}),[]);
+  const [country,setCountry]=useState('');const [other,setOther]=useState('');const [region,setRegion]=useState('');
+  const [busy,setBusy]=useState(false);const [msg,setMsg]=useState<{tone:'success'|'error';text:string}|null>(null);
+  useEffect(()=>{const r=loaded.data;if(!r)return;const known=COUNTRIES.some(([c])=>c===r.countryCode);setCountry(r.countryCode?known?r.countryCode:'other':'');setOther(r.countryCode&&!known?r.countryCode:'');setRegion(r.region??'');},[loaded.data]);
+  if(!loaded.data)return loaded.loading?<Loading label="Загружаем регион"/>:<Notice tone="error">{errorText(loaded.error)}</Notice>;
+  const save=async(clear=false)=>{
+    const code=clear?null:country==='other'?other.trim().toUpperCase():country||null;
+    if(code&&!/^[A-Z]{2}$/.test(code)){setMsg({tone:'error',text:'Код страны — две латинские буквы, например DE.'});return;}
+    setBusy(true);setMsg(null);
+    try{await api('updateSupportRegion',{expectedRevision:loaded.data!.revision,countryCode:code,region:code&&region.trim()?region.trim():null},{key:newKey()});setMsg({tone:'success',text:clear?'Регион сброшен.':'Сохранено.'});loaded.reload();}
+    catch(e){setMsg({tone:'error',text:isApiError(e,'REVISION_CONFLICT')?'Регион изменили в боте или другом окне — показана актуальная версия.':errorText(e)});loaded.reload();}
+    finally{setBusy(false);}
+  };
+  return (
+    <form className="grid-form" onSubmit={e=>{e.preventDefault();void save();}}>
+      <p className="small muted">Нужен только чтобы в сложной ситуации показать проверенные местные контакты. Страну не определяем по языку, часовому поясу или адресу.</p>
+      <div className="row">
+        <div className="field"><label htmlFor="support-country">Страна</label><select id="support-country" value={country} onChange={e=>setCountry(e.target.value)}><option value="">Не указана</option>{COUNTRIES.map(([c,n])=><option key={c} value={c}>{n}</option>)}<option value="other">Другая…</option></select></div>
+        {country==='other'&&<TextField label="Код страны (ISO, 2 буквы)" value={other} maxLength={2} onChange={e=>setOther(e.target.value)}/>}
+        {country&&<TextField label="Регион или крупный город (необязательно)" value={region} maxLength={100} onChange={e=>setRegion(e.target.value)}/>}
+      </div>
+      {msg&&<Notice tone={msg.tone}>{msg.text}</Notice>}
+      <div className="actions"><Button type="submit" busy={busy}>Сохранить регион</Button>{loaded.data.countryCode&&<Button variant="secondary" onClick={()=>void save(true)}>Сбросить</Button>}</div>
+    </form>
+  );
+}
+
 function WebSessions() {
   const list=useAsync(signal=>auth('sessions',{limit:20},{signal}),[]);
   const {refresh}=useSession();const [error,setError]=useState<string|null>(null);
@@ -121,6 +152,7 @@ export function SettingsPage() {
       </section>
       <section className="card"><h2>Почта</h2><EmailSection/></section>
       <section className="card"><h2>Напоминания</h2><RemindersForm/></section>
+      <section className="card"><h2>Регион для контактов помощи</h2><SupportRegion/></section>
       <section className="card"><h2>Входы на сайт</h2><WebSessions/></section>
       <section className="card"><h2>Удаление</h2>
         <p className="small muted">Сообщения в чате Telegram эти действия не удаляют — их можно удалить только в Telegram. Резервные копии очищаются по сроку хранения, не мгновенно.</p>

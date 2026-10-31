@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import type {z} from 'zod';
 import type {Preview} from '@between/contracts/product';
-import {navigate} from '../../app/router';
+import {Link,navigate} from '../../app/router';
 import {Button,Loading,Notice} from '../../components/ui';
 import {api,errorText,newKey} from '../../lib/api';
 import {kindLabels} from '../../lib/labels';
@@ -10,14 +10,18 @@ import {recordStage} from '../../lib/stage';
 
 type Pv=z.infer<typeof Preview>;
 
+/** Verified contacts only for the region the user chose explicitly; no country is guessed. */
 function Support() {
-  const s=useAsync(signal=>api('support',{countryCode:'RU'},{signal}),[]);
+  const s=useAsync(signal=>api('support',{},{signal}),[]);
   if(s.loading)return <Loading label="Загружаем"/>;
   if(!s.data)return <Notice tone="error">{errorText(s.error)}</Notice>;
+  const d=s.data;
   return (
     <Notice tone="error" title="Похоже, ситуация может быть опасной">
-      <p>{s.data.message}</p>
-      {s.data.contacts.length>0&&<ul>{s.data.contacts.map(c=><li key={c.label}>{c.label}{c.phone?`: ${c.phone}`:''} {c.url&&<a href={c.url} rel="noopener noreferrer">{c.url}</a>} <span className="small muted">(проверено {new Date(c.verifiedAt).toLocaleDateString('ru-RU')})</span></li>)}</ul>}
+      <p>{d.message}</p>
+      {d.availability==='available'&&<ul>{d.contacts.map(c=><li key={c.label}>{c.label}{c.phone?`: ${c.phone}`:''} {c.url&&<a href={c.url} rel="noopener noreferrer">{c.url}</a>} <span className="small muted">(проверено {new Date(c.verifiedAt).toLocaleDateString('ru-RU')})</span></li>)}</ul>}
+      {d.availability==='region_required'&&<p>Чтобы показать проверенные местные контакты, укажите страну в <Link to="/settings">настройках</Link>. Без этого номеров не будет — мы их не придумываем.</p>}
+      {d.availability==='unavailable'&&<p>Проверенных контактов для вашего региона пока нет.</p>}
       <p className="small">Сервис может не распознать опасность и не может позвать помощь за вас. Обычный разбор здесь отложен.</p>
     </Notice>
   );
@@ -34,7 +38,7 @@ export function PreviewPage({id}:{id:string}) {
   if(loaded.loading&&!preview)return <Loading label="Готовим предпросмотр"/>;
   if(!preview)return <Notice tone="error" action={<Button variant="secondary" onClick={loaded.reload}>Повторить</Button>}>{errorText(loaded.error)}</Notice>;
   const dirty=Object.entries(edits).some(([fieldId,value])=>preview.fields.find(f=>f.id===fieldId)?.value!==value);
-  const tooLarge=preview.budget.fit==='too_large';
+  const tooLarge=preview.budget.fit==='too_large',fits=preview.budget.fit==='fits';
   const save=async()=>{
     setBusy('save');setError(null);
     try{
@@ -70,9 +74,10 @@ export function PreviewPage({id}:{id:string}) {
       </form>
       <p className="small muted">Бюджет модели: ввод {preview.budget.inputTokens}, ответ до {preview.budget.maxOutputTokens}, окно {preview.budget.contextWindow} токенов{preview.budget.fit==='unknown'?' — проверить заранее не удалось':''}.</p>
       {tooLarge&&<Notice tone="error">Текст не помещается в контекст модели. Сократите поля — обрезать молча не будем.</Notice>}
+      {preview.budget.fit==='unknown'&&<Notice tone="error">Размер текста для модели не удалось проверить — отправка недоступна. Сократите текст или попробуйте позже.</Notice>}
       {error&&<Notice tone="error">{error}</Notice>}
       {preview.safety!=='support'&&<div className="actions">
-        <Button busy={busy==='send'} disabled={dirty||tooLarge||busy!==null} onClick={()=>void send()}>Отправить в модель</Button>
+        <Button busy={busy==='send'} disabled={dirty||!fits||busy!==null} onClick={()=>void send()}>Отправить в модель</Button>
         {dirty&&<span className="small muted">Сначала сохраните правки — подтверждается только актуальная версия.</span>}
       </div>}
     </>

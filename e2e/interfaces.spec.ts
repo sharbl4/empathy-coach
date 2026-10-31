@@ -123,3 +123,37 @@ test('mobile width: login, history and preview have no horizontal scroll',async(
     }
   }finally{await context.close();}
 });
+
+test('unfinished composer draft is stored by the domain and restored after reload (no localStorage)',async({page})=>{
+  await login(page,'A');
+  await page.getByRole('link',{name:'Новый разбор',exact:true}).first().click();
+  await page.getByLabel('Сообщение, которое хотите понять').fill('Давай потом поговорим');
+  await page.getByLabel('Кто этот человек').fill('Коллега');
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(()=>JSON.stringify({...localStorage}))).not.toContain('Давай потом');
+  await page.reload();
+  await expect(page.getByText('Продолжаем черновик',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Сообщение, которое хотите понять')).toHaveValue('Давай потом поговорим');
+  await expect(page.getByLabel('Кто этот человек')).toHaveValue('Коллега');
+});
+
+test('assessment answers are saved after each choice and restored after reload',async({page})=>{
+  await login(page,'A');
+  await page.getByRole('link',{name:'Практика',exact:true}).click();
+  await page.getByRole('button',{name:'Входной тест',exact:true}).click();
+  const first=page.locator('fieldset').first().getByRole('radio').first();
+  await first.check();await page.waitForTimeout(500);
+  await page.reload();await page.getByRole('button',{name:'Входной тест',exact:true}).click();
+  await expect(page.locator('fieldset').first().getByRole('radio').first()).toBeChecked();
+});
+
+test('support region is an explicit stored choice that can be cleared',async({page})=>{
+  await login(page,'A');
+  await page.getByRole('link',{name:'Настройки',exact:true}).click();
+  await page.getByLabel('Страна').selectOption('KZ');
+  await page.getByRole('button',{name:'Сохранить регион',exact:true}).click();
+  await expect(page.getByText('Сохранено.',{exact:true})).toBeVisible();
+  await page.reload();await expect(page.getByLabel('Страна')).toHaveValue('KZ');
+  await page.getByRole('button',{name:'Сбросить',exact:true}).click();
+  await page.reload();await expect(page.getByLabel('Страна')).toHaveValue('');
+});

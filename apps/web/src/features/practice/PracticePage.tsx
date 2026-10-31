@@ -7,6 +7,7 @@ import {api,errorText,isApiError,newKey} from '../../lib/api';
 import {skillLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
 import {recordStage} from '../../lib/stage';
+import {saveDialogue,type Dialogue} from '../../lib/dialogue';
 
 type Form=z.infer<typeof AssessmentForm>;type Result=z.infer<typeof AssessmentResult>;
 
@@ -42,6 +43,12 @@ function Cards() {
 function CardDetail({id,onDone}:{id:string;onDone():void}) {
   const c=useAsync(signal=>api('card',{id},{signal}),[id]);
   const [answer,setAnswer]=useState('');const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
+  const [started,setStarted]=useState(false);
+  // The started task (card id + content version, no text) is saved in the shared dialogue, so the bot can continue it.
+  const markStarted=async()=>{
+    if(started||!c.data)return;setStarted(true);
+    try{const d=await api('dialogue',{});await saveDialogue(d,{step:'card',navigation:{kind:'card',cardId:c.data.id,contentVersion:c.data.contentVersion}});}catch{/* best effort: the attempt itself is still sent through preview */}
+  };
   if(!c.data)return c.loading?<Loading label="Открываем"/>:<Notice tone="error">{errorText(c.error)}</Notice>;
   const card=c.data;
   const complete=async()=>{setBusy('done');setError(null);try{await api('completeCard',{id:card.id,contentVersion:card.contentVersion},{key:newKey()});recordStage('card_completed');c.reload();onDone();}catch(e){setError(errorText(e));}finally{setBusy(null);}};
@@ -49,7 +56,7 @@ function CardDetail({id,onDone}:{id:string;onDone():void}) {
   return (
     <div className="mark-detail">
       <p>{card.theory}</p><p><strong>Пример:</strong></p><p className="message">{card.example}</p><p><strong>Попробуйте:</strong> {card.practice}</p>
-      <TextArea label="Ваша попытка" value={answer} maxLength={3000} onChange={e=>setAnswer(e.target.value)}/>
+      <TextArea label="Ваша попытка" value={answer} maxLength={3000} onFocus={()=>void markStarted()} onChange={e=>setAnswer(e.target.value)}/>
       <div className="actions"><Button busy={busy==='try'} disabled={!answer.trim()} onClick={()=>void tryIt()}>Получить отзыв</Button>{!card.completed&&<Button variant="secondary" busy={busy==='done'} onClick={()=>void complete()}>Отметить пройденной</Button>}</div>
       {error&&<Notice tone="error">{error}</Notice>}
     </div>
@@ -59,24 +66,36 @@ function CardDetail({id,onDone}:{id:string;onDone():void}) {
 function Assessment() {
   const [kind,setKind]=useState<'baseline'|'followup'|null>(null);
   const [form,setForm]=useState<Form|null>(null);const [answers,setAnswers]=useState<Record<string,string>>({});
+  const [dialogue,setDialogue]=useState<Dialogue|null>(null);
   const [result,setResult]=useState<Result|null>(null);const [error,setError]=useState<string|null>(null);const [busy,setBusy]=useState(false);
   const key=useState(newKey)[0];
   const results=useAsync(signal=>api('assessmentResults',{limit:10},{signal}),[result]);
+  const ordered=(f:Form,a:Record<string,string>)=>f.tasks.filter(t=>a[t.id]).map(t=>({questionId:t.id,choiceId:a[t.id]!}));
   const open=async(k:'baseline'|'followup')=>{setKind(k);setError(null);setResult(null);setBusy(true);
-    try{const f=await api('assessment',{kind:k});setForm(f);setAnswers({});}catch(e){setForm(null);setError(isApiError(e,'ASSESSMENT_NOT_DUE')?'Повторный тест откроется через 7 дней после входного.':errorText(e));}finally{setBusy(false);}};
-  const submit=async()=>{if(!form)return;setBusy(true);setError(null);
-    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,answers:form.tasks.map(t=>({questionId:t.id,choiceId:answers[t.id]!}))},{key}));recordStage('assessment_completed');setForm(null);}
-    catch(e){setError(errorText(e));}finally{setBusy(false);}};
+    try{
+      const [f,d]=await Promise.all([api('assessment',{kind:k}),api('dialogue',{})]);
+      const nav=d.navigation;
+      // Continue answers saved earlier (in the bot or another window) for the same form version.
+      const saved=nav.kind==='assessment'&&nav.assessmentId===f.id&&nav.contentVersion===f.contentVersion?Object.fromEntries(nav.answers.map(x=>[x.questionId,x.choiceId])):{};
+      setForm(f);setAnswers(saved);setDialogue(d);
+    }catch(e){setForm(null);setError(isApiError(e,'ASSESSMENT_NOT_DUE')?'Повторный тест откроется через 7 дней после входного.':errorText(e));}finally{setBusy(false);}};
+  const choose=async(taskId:string,choiceId:string)=>{
+    if(!form||!dialogue)return;const next={...answers,[taskId]:choiceId};setAnswers(next);setError(null);
+    try{setDialogue(await saveDialogue(dialogue,{step:'assessment',navigation:{kind:'assessment',assessmentId:form.id,contentVersion:form.contentVersion,assessmentKind:form.kind,answers:ordered(form,next)}}));}
+    catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново, чтобы увидеть сохранённые.':`Ответ не сохранился: ${errorText(e)}`);}
+  };
+  const submit=async()=>{if(!form||!dialogue)return;setBusy(true);setError(null);
+    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:dialogue.revision,answers:ordered(form,answers)},{key}));recordStage('assessment_completed');setForm(null);}
+    catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново.':errorText(e));}finally{setBusy(false);}};
   return (
     <section className="card" aria-label="Тест до и после">
       <h2>Тест до/после</h2>
-      <p className="small muted">Добровольно, 3–5 заданий, без рейтинга. Результат по рубрике 0–2 — после всей серии. Повторный тест — через 7 дней.</p>
+      <p className="small muted">Добровольно, 3–5 заданий, без рейтинга. Каждый ответ сохраняется сразу (можно продолжить в боте). Результат по рубрике 0–2 — после всей серии. Повторный тест — через 7 дней.</p>
       <div className="actions"><Button variant="secondary" busy={busy&&kind==='baseline'} onClick={()=>void open('baseline')}>Входной тест</Button><Button variant="secondary" busy={busy&&kind==='followup'} onClick={()=>void open('followup')}>Повторный тест</Button></div>
       {error&&<Notice tone="error">{error}</Notice>}
       {form&&form.submittedAt&&<Notice>Этот тест уже пройден.</Notice>}
       {form&&!form.submittedAt&&<form className="grid-form" onSubmit={e=>{e.preventDefault();void submit();}}>
-        <p className="small muted">Ответы в этой вкладке сохраняются до отправки; при перезагрузке их нужно выбрать заново.</p>
-        {form.tasks.map((t,n)=><fieldset key={t.id}><legend>{n+1}. {t.prompt}</legend><div className="choice-grid">{t.choices.map(c=><label key={c.id} className={`choice${answers[t.id]===c.id?' choice-on':''}`}><input type="radio" name={t.id} checked={answers[t.id]===c.id} onChange={()=>setAnswers({...answers,[t.id]:c.id})}/><span>{c.text}</span></label>)}</div></fieldset>)}
+        {form.tasks.map((t,n)=><fieldset key={t.id}><legend>{n+1}. {t.prompt}</legend><div className="choice-grid">{t.choices.map(c=><label key={c.id} className={`choice${answers[t.id]===c.id?' choice-on':''}`}><input type="radio" name={t.id} checked={answers[t.id]===c.id} onChange={()=>void choose(t.id,c.id)}/><span>{c.text}</span></label>)}</div></fieldset>)}
         <Button type="submit" busy={busy} disabled={form.tasks.some(t=>!answers[t.id])}>Отправить ответы</Button>
       </form>}
       {result&&<Notice tone="success" title="Результат"><ol>{result.scores.map(s=><li key={s.questionId}>{s.score}/2 — {s.rationale}</li>)}</ol><p>{result.notice}.</p>{result.followupEligibleAt&&<p>Повторный тест будет доступен с {new Date(result.followupEligibleAt).toLocaleDateString('ru-RU')}. Напоминание — только если включите его в настройках.</p>}</Notice>}

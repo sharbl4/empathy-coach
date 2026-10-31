@@ -8,6 +8,8 @@ import {contextLabels,goalLabels,modeLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
 import {sourceKind} from '../preview/source';
 import {recordStage} from '../../lib/stage';
+import {cleanDraft,saveDialogue,type Dialogue,type Draft} from '../../lib/dialogue';
+import {isApiError} from '../../lib/api';
 
 type Mode=z.infer<typeof LearningMode>;type Ctx=z.infer<typeof ContextType>;type GoalValue=z.infer<typeof Goal>;
 interface Turn {id:string;speaker:'self'|'other';text:string}
@@ -25,6 +27,22 @@ export function ComposePage() {
   const [title,setTitle]=useState('');
   const [busy,setBusy]=useState(false);const [error,setError]=useState<string|null>(null);
   const key=useRef(newKey());
+  const dialogue=useRef<Dialogue|null>(null);
+  const [restored,setRestored]=useState(false);
+  const [conflict,setConflict]=useState<Dialogue|null>(null);
+  const [saveError,setSaveError]=useState<string|null>(null);
+  const fill=(d:Draft)=>{
+    if(d.mode)setMode(d.mode);if(d.message)setMessage(d.message);if(d.draft)setDraft(d.draft);if(d.intent!==undefined)setIntent(d.intent);
+    if(d.relationship)setRelationship(d.relationship);if(d.context!==undefined)setContext(d.context);if(d.contextType)setContextType(d.contextType);if(d.goal)setGoal(d.goal);
+    if(d.turns)setTurns(d.turns);if(d.title)setTitle(d.title);
+    if(d.guess){setUnsure(d.guess.unsure);setEmotions(d.guess.emotions.join(', '));setQuotes(d.guess.quotes);}
+  };
+  // Continue an unfinished draft started in the bot or another window (shared dialogue in the DB).
+  const loaded=useAsync(async signal=>exampleId?null:api('dialogue',{},{signal}),[exampleId]);
+  useEffect(()=>{
+    const d=loaded.data;if(!d)return;dialogue.current=d;
+    if((d.step==='compose'||d.step==='guess')&&d.draft.mode&&!d.sessionId){fill(d.draft);setRestored(true);}
+  },[loaded.data]);
   // Any change is a new intent: a new Idempotency-Key, so an edited form never reuses an old result.
   useEffect(()=>{key.current=newKey();},[mode,message,draft,intent,relationship,context,contextType,goal,turns,emotions,quotes,unsure,title]);
   const example=useAsync(async signal=>exampleId?api('example',{id:exampleId},{signal}):null,[exampleId]);
@@ -36,6 +54,20 @@ export function ComposePage() {
     if(i.mode==='say_direct'){setDraft(i.draft);setIntent(i.intent);}
     if(i.mode==='before_send')setDraft(i.draft);
   },[example.data]);
+  const currentDraft=():Draft|null=>cleanDraft({mode,title,message:mode==='understand'?message:undefined,draft:mode==='say_direct'||mode==='before_send'?draft:undefined,intent:mode==='say_direct'?intent:undefined,
+    relationship,context,contextType,goal,turns:mode==='thread'?turns:undefined,guess:mode==='understand'||mode==='thread'?{emotions:unsure?[]:emotions.split(',').map(x=>x.trim()).filter(Boolean).slice(0,3),quotes:unsure?[]:quotes,unsure}:undefined});
+  // Debounced save of the draft into the shared dialogue; a concurrent change from the bot is shown, not overwritten.
+  useEffect(()=>{
+    if(!dialogue.current||conflict)return;
+    const timer=window.setTimeout(()=>{
+      const d=currentDraft(),current=dialogue.current;if(!d||!current)return;
+      saveDialogue(current,{step:'compose',draft:d}).then(next=>{dialogue.current=next;setSaveError(null);},error=>{
+        if(isApiError(error,'REVISION_CONFLICT'))void api('dialogue',{}).then(setConflict,()=>setSaveError(errorText(error)));
+        else setSaveError(errorText(error));
+      });
+    },800);
+    return ()=>window.clearTimeout(timer);
+  },[mode,message,draft,intent,relationship,context,contextType,goal,turns,emotions,quotes,unsure,title,conflict]);
   const sources=mode==='thread'?turns.map(t=>t.text):[message];
   const guessable=mode==='understand'||mode==='thread';
   const addQuote=()=>{const v=quote.trim();if(!v)return;if(!sources.some(s=>s.includes(v))){setError('Такой цитаты нет в тексте — скопируйте слова точно.');return;}setError(null);if(!quotes.includes(v)&&quotes.length<3)setQuotes([...quotes,v]);setQuote('');};
@@ -50,6 +82,8 @@ export function ComposePage() {
     setBusy(true);
     try{
       const session=await api('createSession',parsed.data,{key:key.current});
+      // The draft became a saved situation: clear it from the shared dialogue so the bot does not resume it.
+      if(dialogue.current)await saveDialogue(dialogue.current,{step:'menu'}).catch(()=>{});
       const preview=await api('createPreview',{kind:sourceKind(mode),sessionId:session.id,expectedRevision:session.revision},{key:newKey()});
       recordStage('preview_created',{contextType,resourceId:preview.id});
       navigate(`/previews/${preview.id}`);
@@ -59,6 +93,11 @@ export function ComposePage() {
   return (
     <>
       <h1>Новый разбор</h1>
+      {restored&&<Notice title="Продолжаем черновик">Черновик сохранён на сервере (например, начат в боте). Изменения сохраняются автоматически.</Notice>}
+      {conflict&&<Notice tone="error" title="Черновик изменили в боте или другом окне" action={<>
+        <Button variant="secondary" onClick={()=>{dialogue.current=conflict;fill(conflict.draft);setConflict(null);}}>Загрузить их версию</Button>
+        <Button variant="secondary" onClick={()=>{dialogue.current=conflict;setConflict(null);}}>Оставить мою</Button></>}>Ничего не перезаписано. Выберите, какую версию продолжить.</Notice>}
+      {saveError&&<Notice tone="error">Черновик не сохранился на сервере: {saveError} Введённое остаётся на странице.</Notice>}
       {example.data&&<Notice title="Вымышленный пример">Разбор сгенерирует настоящая локальная модель — заготовленных ответов нет. Сначала попробуйте свою версию.</Notice>}
       <form className="grid-form" onSubmit={e=>{e.preventDefault();void submit();}}>
         <fieldset><legend>Режим</legend><div className="chips">{(Object.keys(modeLabels) as Mode[]).map(m=><button key={m} type="button" className="chip" aria-pressed={mode===m} onClick={()=>setMode(m)}>{modeLabels[m]}</button>)}</div></fieldset>

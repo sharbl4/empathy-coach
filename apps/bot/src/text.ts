@@ -113,8 +113,9 @@ export const assessmentTask=(f:I<typeof AssessmentForm>,i:number)=>{const t=f.ta
 export const assessmentResult=(r:I<typeof AssessmentResult>)=>`Результат ${r.kind==='baseline'?'входного':'повторного'} теста\n\n${r.scores.map((s,n)=>`${n+1}. ${s.score}/2 — ${s.rationale}`).join('\n')}\n\n${r.notice}.${r.followupEligibleAt?`\n\nПовторный тест будет доступен с ${new Date(r.followupEligibleAt).toLocaleDateString('ru-RU')}.`:''}`;
 
 export function support(s:I<typeof Support>) {
-  const contacts=s.contacts.map(c=>`• ${c.label}${c.phone?`: ${c.phone}`:''}${c.url?` ${c.url}`:''} (проверено ${new Date(c.verifiedAt).toLocaleDateString('ru-RU')})`).join('\n');
-  return `${s.message}${contacts?`\n\n${contacts}`:''}\n\nЯ не могу вызвать помощь или написать кому-то за тебя, и могу не распознать опасность. Можно спокойно подготовить просьбу о поддержке или фразу, обозначающую границу.`;
+  const contacts=s.availability==='available'?s.contacts.map(c=>`• ${c.label}${c.phone?`: ${c.phone}`:''}${c.url?` ${c.url}`:''} (проверено ${new Date(c.verifiedAt).toLocaleDateString('ru-RU')})`).join('\n'):'';
+  const note=s.availability==='region_required'?'\n\nЧтобы показать проверенные местные контакты, выбери страну. Без этого номеров не будет — мы их не придумываем.':s.availability==='unavailable'?'\n\nПроверенных контактов для этого региона пока нет.':'';
+  return `${s.message}${contacts?`\n\n${contacts}`:''}${note}\n\nЯ не могу вызвать помощь или написать кому-то за тебя, и могу не распознать опасность. Можно спокойно подготовить просьбу о поддержке или фразу, обозначающую границу.`;
 }
 
 export const runFailure:Record<string,string>={

@@ -11,6 +11,9 @@ const COMMANDS=new Set(['start','menu','cancel','history','account','help']);
 export const logError=(where:string,error:unknown)=>console.error(`[bot] ${where}: ${failureCode(error)??(error instanceof TelegramError?`telegram ${error.status}`:error instanceof Error?error.name:'unknown')}`);
 const sleep=(ms:number,signal?:AbortSignal)=>new Promise<void>(resolve=>{const timer=setTimeout(resolve,ms);signal?.addEventListener('abort',()=>{clearTimeout(timer);resolve();},{once:true});});
 const MAX_BACKOFF=60000;
+/** Consecutive failures to obtain or record a durable outcome before the poller stops (fatal, safe error, root shuts down). */
+export const MAX_UNRECORDED=5;
+export class PollerStalled extends Error {constructor() {super('Poller cannot record durable update outcomes');this.name='PollerStalled';}}
 
 export interface PollerOptions {timeoutSeconds:number;backoffMs:number;fatal?:(error:unknown)=>boolean}
 /** Outcome of one update: acknowledged, or wait (retry_wait / unrecordable failure) before polling again. */
@@ -35,6 +38,7 @@ export class Poller {
   polling=false;
   /** Set when a failure could not be recorded durably: surfaced as unhealthy through health().polling. */
   degraded=false;
+  private unrecorded=0;
   constructor(private tg:TelegramApi,private domain:ProductFacade,private flows:Flows,private options:PollerOptions={timeoutSeconds:25,backoffMs:2000}) {}
 
   async run(signal:AbortSignal) {
@@ -48,12 +52,14 @@ export class Poller {
           for(const update of updates){
             if(signal.aborted)break;
             const handled=await this.handle(update);
+            // Bounded: no endless loop when the domain cannot store any outcome; never ack such an update.
+            if(this.unrecorded>=MAX_UNRECORDED)throw new PollerStalled();
             if(!handled.done){await sleep(Math.min(handled.waitMs,MAX_BACKOFF),signal);break;}
           }
         }catch(error){
           if(signal.aborted)break;
           this.polling=false;logError('poll',error);
-          if(this.options.fatal?.(error))throw error;
+          if(error instanceof PollerStalled||this.options.fatal?.(error))throw error;
           await sleep(backoff,signal);backoff=Math.min(backoff*2,MAX_BACKOFF);
         }
       }
@@ -71,7 +77,7 @@ export class Poller {
     if(update.callback_query)await this.tg.answerCallbackQuery(update.callback_query.id).catch(()=>{});
     let ctx:UserContext,receipt;
     try{ctx=await this.domain.resolveUser(c.identity);receipt=await this.domain.claimUpdate(ctx,updateId);}
-    catch(error){logError('claim',error);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+    catch(error){logError('claim',error);return this.unrecordable(c.identity.privateChatId);}
     if(receipt.status==='completed'||receipt.status==='failed')return this.ack(updateId);
     if(receipt.status==='retry_wait')return {done:false,waitMs:Math.max(1000,Date.parse(receipt.nextAttemptAt??'')-Date.now()||this.options.backoffMs)};
     try{
@@ -82,21 +88,28 @@ export class Poller {
       const failure=updateFailure(error,`bot-${receipt.intentKey}`);
       let recorded;
       try{recorded=await this.domain.recordUpdateFailure(ctx,{updateId,failure},intentKey(receipt.intentKey,'failure',receipt.attempts));}
-      catch(recordError){logError('record-failure',recordError);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+      catch(recordError){logError('record-failure',recordError);return this.unrecordable(c.identity.privateChatId);}
+      this.unrecorded=0;
       if(recorded.status==='retry_wait'){
         if(recorded.attempts===1)await this.tg.sendMessage(c.identity.privateChatId,'Временная ошибка сервера. Я повторю действие сам — нажимать ещё раз не нужно.').catch(()=>{});
         return {done:false,waitMs:Math.max(1000,Date.parse(recorded.nextAttemptAt??'')-Date.now()||this.options.backoffMs)};
       }
       // Terminal failure is persisted: tell the user honestly once, then ack (the receipt stays failed).
-      await this.tg.sendMessage(c.identity.privateChatId,texts.failed).catch(()=>{});
+      await this.tg.sendMessage(c.identity.privateChatId,recorded.failure?.code==='OPERATION_IN_PROGRESS'?texts.busy:texts.failed).catch(()=>{});
       return this.ack(updateId);
     }
     return this.ack(updateId);
   }
 
   private async ack(updateId:string):Promise<Handled> {
-    try{await this.domain.acknowledgeUpdate(updateId);this.degraded=false;return {done:true};}
-    catch(error){logError('ack',error);this.degraded=true;return {done:false,waitMs:this.options.backoffMs};}
+    try{await this.domain.acknowledgeUpdate(updateId);this.degraded=false;this.unrecorded=0;return {done:true};}
+    catch(error){logError('ack',error);return this.unrecordable(null);}
+  }
+  /** No durable outcome could be stored: do not ack, do not promise a replay; count towards the fatal bound. */
+  private async unrecordable(chatId:string|null):Promise<Handled> {
+    this.degraded=true;this.unrecorded++;
+    if(chatId&&this.unrecorded===1)await this.tg.sendMessage(chatId,texts.internal).catch(()=>{});
+    return {done:false,waitMs:this.options.backoffMs};
   }
 
   private async process(update:TgUpdate,ctx:UserContext,identity:PrivateTelegramIdentity,intent:string) {

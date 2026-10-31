@@ -1,6 +1,6 @@
 {
   "name": "empathy-coach", "version": "0.1.0", "private": true,
-  "workspaces": ["packages/contracts", "apps/api", "apps/web"],
+  "workspaces": ["packages/contracts", "apps/api", "apps/web", "apps/bot"],
   "engines": {"node": ">=24.22.1 <25"},
   "scripts": {
     "dev": "node scripts/with-env.mjs --npm-run dev:workspaces",
@@ -8,7 +8,7 @@
     "build": "npm run build -w @between/contracts && node scripts/build-web.mjs && npm run build -w @between/api",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "npm run build -w @between/contracts && npm run typecheck --workspaces",
-    "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts scripts/test/*.test.mjs",
+    "test": "npm run build -w @between/contracts && tsx --test packages/contracts/test/*.test.ts apps/api/test/*.test.ts apps/bot/test/*.test.ts scripts/test/*.test.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "services:check": "node scripts/with-env.mjs scripts/check-services.mjs",
     "checkpoint:live": "npm run build -w @between/contracts && node scripts/with-env.mjs scripts/live-checkpoint.mjs",

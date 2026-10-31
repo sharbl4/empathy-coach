@@ -1,5 +1,6 @@
 import { api, outputs, Run, Session, SessionInput, SessionPage, Progress, ApiError, Roleplay, type SessionInput as Input } from './index.js';
 export const id='11111111-1111-4111-8111-111111111111';
+export const headerFixtures:Record<string,unknown>={createSession:{'idempotency-key':id}};
 export const timestamp='2026-10-30T06:00:00.000Z';
 export const situations: Input[] = [
   {title:'Встреча',situation:{message:'Давай поговорим завтра.',relationship:'Коллега',context:'Обсуждали встречу',goal:'clarify'},guess:{emotions:[],evidenceQuotes:['завтра'],unsure:true}},
@@ -37,5 +38,6 @@ export function validateFixtures(){
   for(const [key,route] of Object.entries(api)){
     route.response.parse(responseFixtures[key]);
     if('body' in route)route.body.parse(requestFixtures[key]);
+    if('headers' in route)route.headers.parse(headerFixtures[key]);
   }
 }

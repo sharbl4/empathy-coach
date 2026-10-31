@@ -1,5 +1,5 @@
 import { z } from 'zod';
-export const CONTRACT_VERSION = '0.1.0';
+export const CONTRACT_VERSION = '0.2.0';
 export const Id = z.uuid();
 const text = (max=3000) => z.string().trim().min(1).max(max);
 const short = text(500);
@@ -15,6 +15,8 @@ export const ReplyRequest = ExpectedRevision.extend({draft:text()});
 export const ExerciseAnswer = ExpectedRevision.extend({exerciseRunId:Id,answer:text()});
 export const TurnRequest = ExpectedRevision.extend({content:text()});
 export const IdempotencyHeaders = z.object({'idempotency-key':Id});
+export const CREATE_SESSION_OPERATION = 'session.create';
+export const CreateSessionHeaders = IdempotencyHeaders;
 export const Analysis = z.strictObject({literalMeaning:text(),interpretations:z.array(z.strictObject({emotion:short,possibleNeed:short,explanation:text(),evidenceQuotes:z.array(text(6000)).max(6)})).min(2).max(3),uncertainty:text(),clarifyingQuestion:short,guessFeedback:text(),skillTip:short});
 export const ReplyOption = z.strictObject({goal:Goal,text:text(),explanation:short});
 export const ReplyOptions = z.array(ReplyOption).length(4).refine(v=>new Set(v.map(x=>x.goal)).size===4,'One option per goal');
@@ -50,7 +52,7 @@ export const Health = z.strictObject({status:z.literal('ok')});
 export const api = {
   live:{method:'GET',path:'/api/health/live',response:Health},ready:{method:'GET',path:'/api/health/ready',response:Health},
   me:{method:'GET',path:'/api/me',response:Me},updateMe:{method:'PATCH',path:'/api/me',body:UpdateMe,response:Me},deleteData:{method:'DELETE',path:'/api/me/data',body:DeleteData,response:z.null()},
-  createSession:{method:'POST',path:'/api/sessions',body:SessionInput,response:Session},sessions:{method:'GET',path:'/api/sessions',query:SessionQuery,response:SessionPage},session:{method:'GET',path:'/api/sessions/:id',response:SessionDetail},updateSession:{method:'PATCH',path:'/api/sessions/:id',body:UpdateSession,response:Session},deleteSession:{method:'DELETE',path:'/api/sessions/:id',response:z.null()},
+  createSession:{method:'POST',path:'/api/sessions',body:SessionInput,headers:CreateSessionHeaders,idempotencyOperation:CREATE_SESSION_OPERATION,response:Session},sessions:{method:'GET',path:'/api/sessions',query:SessionQuery,response:SessionPage},session:{method:'GET',path:'/api/sessions/:id',response:SessionDetail},updateSession:{method:'PATCH',path:'/api/sessions/:id',body:UpdateSession,response:Session},deleteSession:{method:'DELETE',path:'/api/sessions/:id',response:z.null()},
   analyze:{method:'POST',path:'/api/sessions/:id/analyze',body:ExpectedRevision,response:RunAccepted},replyFeedback:{method:'POST',path:'/api/sessions/:id/reply-feedback',body:ReplyRequest,response:RunAccepted},replyExamples:{method:'POST',path:'/api/sessions/:id/reply-examples',body:ExpectedRevision,response:RunAccepted},exercise:{method:'POST',path:'/api/sessions/:id/exercise',body:ExpectedRevision,response:RunAccepted},exerciseFeedback:{method:'POST',path:'/api/sessions/:id/exercise-feedback',body:ExerciseAnswer,response:RunAccepted},roleplayStart:{method:'POST',path:'/api/sessions/:id/roleplays',body:ExpectedRevision,response:RunAccepted},roleplayTurn:{method:'POST',path:'/api/roleplays/:id/turns',body:TurnRequest,response:RunAccepted},roleplayFinish:{method:'POST',path:'/api/roleplays/:id/finish',body:ExpectedRevision,response:RunAccepted},retry:{method:'POST',path:'/api/runs/:id/retry',body:ExpectedRevision,response:RunAccepted},run:{method:'GET',path:'/api/runs/:id',response:Run},progress:{method:'GET',path:'/api/progress',response:Progress}
 } as const;
 export type SessionInput = z.infer<typeof SessionInput>;
@@ -59,6 +61,7 @@ export type SessionDetail = z.infer<typeof SessionDetail>;
 export type ApiError = z.infer<typeof ApiError>;
 export type RequestFor<K extends keyof typeof api> = (typeof api)[K] extends {body: infer B extends z.ZodType} ? z.infer<B> : never;
 export type ResponseFor<K extends keyof typeof api> = z.infer<(typeof api)[K]['response']>;
+export type RequestHeadersFor<K extends keyof typeof api> = (typeof api)[K] extends {headers: infer H extends z.ZodType} ? z.infer<H> : never;
 export type OutputFor<K extends keyof typeof outputs> = z.infer<(typeof outputs)[K]>;
 export function outputJsonSchema<K extends keyof typeof outputs>(kind: K) {return z.toJSONSchema(outputs[kind]);}
 export function validateAnalysisEvidence(value: unknown,message: string) {

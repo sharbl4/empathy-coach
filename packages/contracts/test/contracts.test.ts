@@ -1,9 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { api, SessionInput, SessionQuery, ReplyOptions, Run, ExpectedRevision, outputs, outputJsonSchema, validateAnalysisEvidence, validateReplyEvidence } from '../src/index.js';
+import { api, SessionInput, SessionQuery, ReplyOptions, Run, ExpectedRevision, outputs, outputJsonSchema, validateAnalysisEvidence, validateReplyEvidence, CREATE_SESSION_OPERATION } from '../src/index.js';
 import { validateFixtures, situations, pending, runs, outputFixtures } from '../src/fixtures.js';
 test('all shared requests, responses, results and states validate',validateFixtures);
+test('session creation requires a UUID idempotency header in its own operation namespace',()=>{
+  assert.equal(api.createSession.idempotencyOperation,CREATE_SESSION_OPERATION);
+  assert.equal(api.createSession.headers.safeParse({}).success,false);
+  assert.equal(api.createSession.headers.safeParse({'idempotency-key':'invalid'}).success,false);
+  assert.equal(api.createSession.headers.safeParse({'idempotency-key':pending.id,authorization:'Bearer test-only'}).success,true);
+});
 test('rejects ownership, role history and analysis supplied by client',()=>{
   for(const field of ['ownerId','userId','history','analysis'])assert.equal(SessionInput.safeParse({...situations[0],[field]:'untrusted'}).success,false);
   assert.equal(ExpectedRevision.safeParse({expectedRevision:1,history:[]}).success,false);
@@ -27,7 +33,7 @@ test('provider JSON schemas generate and contextual quotes are checked',()=>{
 });
 test('documentation JSON examples match each endpoint schema',()=>{
   const doc=readFileSync('docs/api.md','utf8');
-  const examples=[...doc.matchAll(/<!-- schema:(\w+)\.(body|response) -->\s*```json\s*([\s\S]*?)```/g)];
-  assert.equal(examples.length,Object.values(api).reduce((n,r)=>n+1+('body' in r?1:0),0));
-  for(const [,name,part,json] of examples){const route=api[name as keyof typeof api];assert.ok(route);const schema=part==='body'&&'body' in route?route.body:route.response;schema.parse(JSON.parse(json));}
+  const examples=[...doc.matchAll(/<!-- schema:(\w+)\.(body|response|headers) -->\s*```json\s*([\s\S]*?)```/g)];
+  assert.equal(examples.length,Object.values(api).reduce((n,r)=>n+1+('body' in r?1:0)+('headers' in r?1:0),0));
+  for(const [,name,part,json] of examples){const route=api[name as keyof typeof api];assert.ok(route);assert.ok(part in route);const schema=part==='body'&&'body' in route?route.body:part==='headers'&&'headers' in route?route.headers:route.response;schema.parse(JSON.parse(json));}
 });

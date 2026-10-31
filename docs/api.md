@@ -1,4 +1,4 @@
-# API · contracts 0.1.0
+# API · contracts 0.2.0
 
 Источник истины: packages/contracts. Все объекты strict, неизвестные поля body отклоняются.
 Auth только через Supabase SDK; все маршруты кроме health требуют Bearer.
@@ -105,6 +105,17 @@ null
 ```
 
 ## POST /api/sessions
+
+Обязательные заголовки (операция session.create):
+
+<!-- schema:createSession.headers -->
+```json
+{
+  "idempotency-key": "11111111-1111-4111-8111-111111111111"
+}
+```
+
+Повтор с тем же пользователем/операцией/ключом и нормализованным body возвращает ту же сессию (201), не создаёт новую и не перезаписывает изменения. Другой body — 409 IDEMPOTENCY_CONFLICT. После удаления исходной сессии — 404, без повторного создания. См. session-create-idempotency.md.
 
 Запрос:
 

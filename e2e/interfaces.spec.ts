@@ -240,3 +240,20 @@ test('final: own hypothesis to analysis, clarification, draft feedback, exercise
   }
   await page.goto(sessionUrl);await expect(page.getByRole('link',{name:/завершена/})).toBeVisible();
 });
+
+test('an unfinished test is not destroyed by a new draft: continue or explicit reset',async({page})=>{
+  await login(page,'B');
+  await page.getByRole('link',{name:'Практика',exact:true}).click();
+  await page.getByRole('button',{name:'Входной тест',exact:true}).click();
+  await page.locator('fieldset').first().getByRole('radio').first().check();await page.waitForTimeout(500);
+  await page.getByRole('link',{name:'Новый разбор',exact:true}).first().click();
+  await page.getByLabel('Сообщение, которое хотите понять').fill('Черновик при незавершённом тесте');
+  await expect(page.getByText('Есть незавершённый тест до/после',{exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Продолжить тест',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Сбросить тест',exact:true}).click();
+  await page.getByRole('button',{name:'Да, сбросить тест',exact:true}).click();
+  await expect(page.getByText('Есть незавершённый тест до/после',{exact:true})).toHaveCount(0);
+  await page.getByLabel('Кто этот человек').fill('Друг');await page.waitForTimeout(1500);
+  await page.reload();
+  await expect(page.getByLabel('Сообщение, которое хотите понять')).toHaveValue('Черновик при незавершённом тесте');
+});

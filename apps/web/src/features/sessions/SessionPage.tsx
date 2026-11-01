@@ -18,7 +18,8 @@ type Source=z.infer<typeof PreviewSource>;type Level=z.infer<typeof Difficulty>;
 
 export function SessionPage({id}:{id:string}) {
   const detail=useAsync(signal=>api('session',{id},{signal}),[id]);
-  const [draft,setDraft]=useState('');const [answer,setAnswer]=useState('');const [level,setLevel]=useState<Level>('calm');
+  const saved=useSavedAttempt({step:'compose',sessionId:id});
+  const draft=saved.text,setDraft=saved.change,answer=saved.extraText,setAnswer=saved.changeExtra;const [level,setLevel]=useState<Level>('calm');
   const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);const [confirmDelete,setConfirmDelete]=useState(false);
   const [editing,setEditing]=useState(false);
   const [moreRuns,setMoreRuns]=useState<{items:z.infer<typeof RunV2>[];cursor:string|null}|null>(null);
@@ -61,7 +62,7 @@ export function SessionPage({id}:{id:string}) {
         {main?.status==='succeeded'&&<><RunResult run={main}/><p><Link to={`/runs/${main.id}`}>Открыть с подсветкой и оценкой</Link></p></>}
       </section>
       {analysed&&<section className="card">
-        <h2>Практика по этой ситуации</h2>
+        <h2>Практика по этой ситуации</h2><p className="small" role="status">{saved.status}</p>
         <TextArea label="Ваш черновик ответа" hint="Сначала свой вариант — так полезнее." value={draft} maxLength={3000} counter={{value:draft.length,max:3000}} onChange={e=>setDraft(e.target.value)}/>
         <div className="actions">
           <Button busy={busy==='reply'} disabled={!draft.trim()} onClick={()=>void preview('reply',{kind:'reply_feedback',...base,draft:draft.trim()})}>Разобрать черновик</Button>

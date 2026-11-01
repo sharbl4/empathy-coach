@@ -221,11 +221,11 @@ test('final: own hypothesis to analysis, clarification, draft feedback, exercise
   await page.getByRole('button',{name:'Показать, что уйдёт в модель',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Как уточнить',exact:true})).toBeVisible();
   await page.getByRole('link',{name:'← К ситуации'}).click();const sessionUrl=page.url();
-  await page.getByLabel('Ваш черновик ответа').fill('Я не могу сегодня.');await page.getByRole('button',{name:'Разобрать черновик',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await page.getByLabel('Ваш черновик ответа').fill('Я не могу сегодня.');await expect(page.getByRole('status')).toHaveText('Попытка сохранена.');await page.reload();await expect(page.getByLabel('Ваш черновик ответа')).toHaveValue('Я не могу сегодня.');await page.getByRole('button',{name:'Разобрать черновик',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
   await expect(page.getByRole('region',{name:'До и после'})).toContainText('Я не могу сегодня.');
   await page.goto(sessionUrl);await page.getByRole('button',{name:'Получить упражнение',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
   await expect(page.getByText('Уточни удобное время.',{exact:true})).toBeVisible();await page.goto(sessionUrl);
-  await page.getByLabel('Ваша попытка').fill('Во сколько завтра удобно?');await page.getByRole('button',{name:'Получить отзыв',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await page.getByLabel('Ваша попытка').fill('Во сколько завтра удобно?');await expect(page.getByRole('status')).toHaveText('Попытка сохранена.');await page.reload();await expect(page.getByLabel('Ваша попытка')).toHaveValue('Во сколько завтра удобно?');await page.getByRole('button',{name:'Получить отзыв',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Что получилось',exact:true})).toBeVisible();await page.goto(sessionUrl);
   await page.getByLabel('Собеседник',{exact:true}).selectOption('hurt');await page.getByRole('button',{name:'Начать тренировку',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();await expect(page.getByText('Завтра удобно. Во сколько?',{exact:true})).toBeVisible();
   for(let turn=1;turn<=3;turn++){

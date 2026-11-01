@@ -445,7 +445,11 @@ export class Flows {
       if(!d.draft.mode&&d.sessionId)return this.say(t,'Продолжаем черновик ответа.'+(d.draft.draft?'\nСохранённая попытка:\n'+d.draft.draft:'')+'\nПришли свой вариант одним сообщением.',[[toMenu]]);
       return this.compose(t,d.draft);
     }
-    if(d.step==='guess')return this.toGuess(t,d.draft);
+    if(d.step==='guess'){
+      // Resume the canonical partial hypothesis instead of entering a fresh guess step.
+      if(d.draft.guess)return this.say(t,'Твоя версия сохранена. Продолжи точные цитаты или нажми «Готово».',[[b('Готово','qd')],[toMenu]]);
+      return this.toGuess(t,d.draft);
+    }
     if(d.step==='roleplay'&&d.sessionId)return d.roleplayId?this.continueRoleplay(t,d.sessionId):this.say(t,'Выбери собеседника.',[LEVELS.map(l=>b(T.difficultyLabels[l],'lv',l)),[toMenu]]);
     if(d.step==='card'&&d.navigation.kind==='card'){const card=await this.domain.card(t.ctx,{id:d.navigation.cardId});return this.say(t,T.card(card)+(d.draft.draft?'\n\nСохранённая попытка:\n'+d.draft.draft:'')+'\n\nНапиши свою попытку одним сообщением.',[[toMenu]]);}
     if(d.step==='exercise'&&d.sessionId){const s=await this.domain.session(t.ctx,{id:d.sessionId});const run=s.runs.items.find(r=>r.kind==='exercise'&&r.status==='succeeded'&&r.revision===s.revision);if(run&&run.kind==='exercise'&&run.status==='succeeded')return this.say(t,T.exercise(run.output)+(d.draft.message?'\n\nСохранённая попытка:\n'+d.draft.message:''),[[toMenu]]);return this.openSession(t,d.sessionId);}

@@ -1,3 +1,62 @@
+# Empather · shertwg^3 · финальный кандидат к защите
+
+**Итоговый draft PR: [#24 → main](https://github.com/sharbl4/empathy-coach/pull/24), ветка `feat/final-defense`. Не слит; старые PR не закрыты.** Runtime/code candidate: **f57f6d0bb5d6531081c0fa8cb3deecd6e2305664**. Следующий f123fbb6d47f1fa052d381cba5dfba17c309f4c7 добавляет только тест/feature-аудит Дани; последующие docs-only commits не меняют runtime. Перед merge смотреть Checks именно актуальной головы #24, а не #22/старого candidate. Base main при проверке: a588e55, является предком этой ветки.
+
+Цель — практика развития эмпатии для людей, которым трудно понимать чувства других. Нет обещания доказанного роста эмпатии или диагностики. Маршрут на 60–90 секунд и резерв: [demo-final](demo-final.md). Ниже новая запись заменяет текущие статусы исторического журнала.
+
+## Что включено и исправлено
+
+- Полезные backend b71af10 →95f6cbc, interfaces 5bc5f5f →b8e097c, новый regression f7690b2 →f123fbb. Scoped diff backend отличается от Димы только ранее проверенными model structured-output/static-root fixes. Правка/перестановка реплик, menu/confirmed reset, myRating, domain-only run_completed и ownership сохранены. Отчёт Дани проверен: фактический CI #22 на f7690b2 SUCCESS, но не заменяет CI #24.
+- Основной цикл: email/онбординг → пример/свой текст → гипотеза → полный privacy-preview → подтверждение показанного snapshot → анализ/вопрос → черновик/отзыв → история. Добавлен browser прогон с настоящими facade/HTTP/PG; модель/почта/Telegram в автоматических тестах явно тестовые.
+- Найден и исправлен реальный дефект второго/третьего хода и early finish роли: оба интерфейса использовали revision сессии вместо revision роли. Бот запрашивает owned role; веб использует показанную revision роли, stale не обходится. PG regression проверяет bot turn/finish с различающимися revisions; browser проходит 3 хода и итог.
+- «Продолжить» в истории веба и меню бота читает существующий canonical dialogue. Меню не очищает composer/preview/упражнение/роль/карточку; выбранное поле/speaker сохранены. Сброс отдельный, с подтверждением. Веб сохраняет попытки карточки/роли и reply/exercise draft в существующих полях; reload проверен. Конфликт revision показывается; локальное хранилище текста не используется. Действуют прежние idle1h/max24h TTL; перед уходом дождаться статуса сохранения.
+- «До и после» берёт исходный очищенный draft именно из подтверждённого preview, редакцию и до3 пояснений — из уже сохранённого результата. Веб: адаптивные колонки и явное копирование с fallback; Telegram: последовательно. Отдельной генерации ради оформления нет. Смысл/отказ/границы нужно проверить пользователю; модель не гарантирует их сохранение.
+- 8 вымышленных примеров и одинаковые фразы с разными контекстами уже существовали: не продублированы. Они идут в обычный pipeline, готовый анализ не подставляется. Недоступность модели не меняет доступ к истории/карточкам/настройкам; isolated offline regression проверяет один failed run и отсутствие генерации при чтении.
+- Source и model output не исполняются и не логируются; reasoning/truncation/evidence/schema guards сохранены. Benchmark response_format приведён к проверенному wrapper llama.cpp b12019; модель/архитектура/контракт2.2.1/миграции/зависимости не менялись.
+
+## Фактические проверки
+
+Node24.22.1, PostgreSQL17.6 в отдельном локальном loopback-контейнере; runtime/test DB различны. Корневой .env не читался для тестов и не перезаписывался. Никаких незакоммиченных facade/HTTP stubs.
+
+| Проверка | Результат / границы |
+|---|---|
+| Build / typecheck / lint | PASS, contracts first; все workspaces, тестовые типы, max-warnings0 |
+| Production browser runtime guard | PASS; Supabase/runtime env schemas/fixtures не попали в release client |
+| Contracts/root | **43/43 PASS,0skip** |
+| Обязательные real domain/HTTP + bot tests | **101/101 PASS,0skip**, повтор на f57f6d0; ownership двух пользователей, CSRF, snapshot/revision, идемпотентность, TTL, restart, late delete, lifecycle сохранены |
+| Playwright | **18/18 PASS**, после включения f7690b2; installed Chrome локально, CI использует pinned Playwright Chromium. Реальные backend/HTTP/PG, явные committed test adapters; не live UI |
+| Сохранённый legacy/API набор | **67/67 PASS,0skip** последовательно после остановки browser server; файл-набор npm run test:legacy, TAP вывод через безопасную обёртку |
+| Docker из exact git archive f57f6d0 | PASS; image `between-stage4:f57f6d0`, ID `sha256:679152da21283044fb64c7b4c361c4692a3dd41fd7e0a64d7bb04c07548bd9dc`; passive api/http/bot imports --network none PASS |
+| Compose / PowerShell | check-compose PASS; все deploy/model/*.ps1 разобраны parser без запуска installers/firewall |
+| Remote CI | Проверяется на текущем head [PR24](https://github.com/sharbl4/empathy-coach/pull/24); локальный PASS не заменяет Checks. На code/test head f123fbb все3 jobs SUCCESS (push и PR); PR MERGEABLE с main a588e55. После docs-only head проверить новые Checks отдельно, старый green не подменяет их |
+
+Промежуточные ошибки не скрываются: отсутствовал bundled Chromium →использован установленный Chrome; старое /cancel assertion ожидало очистки вместо сохранения; custom test model считался неверно; fake facade не реализовывал owned roleplay read/revision. Исправлены тесты/адаптер по настоящей семантике, guards не отключались. Один legacy запуск ошибочно пересёкся с browser server на той же DB — его массовые failures не засчитаны, повтор отдельно67/67PASS. Длинный browser тест сначала принял видимую предыдущую реплику в preview за новый результат; теперь ждёт /runs и проверяет счётчик через HTTP (0→1→2). Полные17 сценариев f57f6d0 и объединённые18 с тестом Дани прошли.
+
+## Фактическое тестовое облако и live
+
+QQCloud gg-ubuntu-01, отдельные @test_empather_bot и DB `between_stage4_test_5292`, один штатный app/poller. Развёрнут **f57f6d0**, image и SHA-256 архива совпали на ПК/VM (`0c2b9f45e2a312b60da963cae12e31f1a7960a17423578c8f527360406f1058a`). VM не собирала image; старые be95d13/95f6cbc/291507e доступны для rollback. DB/volume не пересоздавались, новых миграций нет; app bind0.0.0.0:8000, DB наружу не опубликована. Env/секреты и firewall/маршруты организаторов не менялись.
+
+Обновление сначала сохранило аккаунт1/сессии3/runs3 по приватным отпечаткам. Затем обнаружен **live inbox incident**: старый retry_wait receipt и следующий processing receipt блокировали более новые claims (`OPERATION_IN_PROGRESS`); после5 unrecordable attempts poller штатно завершался и контейнер перезапускался. OOM=false; отдельный getMe200. Safe-source диагностика подтвердила bounded stop, а не ошибку формата Gemma. Исход одного отдельного synthetic model probe при этом не установлен: процесс прервался без технического ответа; он не засчитан, автоматического повтора не было.
+
+Владелец **явно разрешил** terminal recovery только2 старых служебных receipt. До изменения снят новый pg_dump0600; transaction проверил точную test DB, pending runs0, ровно2 receipt возрастом>5мин. Только они переведены в failed/INTERNAL_ERROR и сняты соответствующие slot-блокировки. Attempts не подделывались; cursor вручную не двигался; 63 intent-записи, аккаунт1,сессии3,runs3 побайтово сохранены. Guards и bounded retry сохранены. Штатный app снова healthy, restartCount0, HTTP/ready200. Причина появления зависшего receipt ещё **не установлена**; требуется адресный сценарий потерянной повторной доставки Telegram/offset и устранение без автоматической повторной генерации. Этот риск не закрывается операторским recovery.
+
+После recovery владелец по новой просьбе открыл историю и создал новый разбор с новым подтверждённым preview; ответил «все гуд». Настоящая DB подтвердила **сессии4/runs4, succeeded3/delivered_success3/run_completed3/confirmed_success3, pending0**. Это новый live test-bot→QQCloud→домашняя Gemma→сохранение/доставка на f57f6d0, не fixture. Старый MODEL_INVALID_OUTPUT run остаётся failed, его не превращали в success. SMTP AUTH/TLS465 и реальный email confirmation были подтверждены ранее; новых диагностических писем не отправлялось.
+
+После последующего штатного restart f57f6d0 SSH-соединение сбросилось до выдачи полной сверки отпечатков; этот interrupted command не объявляется PASS. Повторная read-only проверка подтвердила новый startedAt, **healthy/restartCount0, сессии4/runs4/succeeded3/delivered3/events3/pending0**, HTTP root/ready200. Новых генераций/completion от restart нет. Строгое before/after сравнение каждого из4 content hashes после этого последнего restart не завершилось и не заявляется; ранее при deploy сравнение исходных3 прошло. Владелец подтвердил открытие истории и новый результат после recovery.
+
+Cloud test backup дополнительно восстановлен в отдельную `between_stage4_restore_test_20261101044802`: аккаунт1/сессии3/runs3 совпали по приватным отпечаткам. Исходная DB не изменена. Закрытые backup остаются только на VM, не Git/чат. Idle sample до incident: app66.89MiB + DB70.41MiB; это **не** суммарный load test. RAM-проба во время прерванного smoke не принята. Полные VRAM/TTFT/p50/p95/качество/ресурсы под нагрузкой не измерены.
+
+## Что ещё мешает полной приёмке / следующий шаг
+
+1. **HTTPS:** повторная проверка https://atlas.gg.qqtech.ru —URLError. Сервис организаторов ранее отвечал «Сервис публикации временно недоступен». После восстановления владелец отправляет **`/publish 8000`** в @gg_domains_bot и подтверждает; затем проверяем HTTPS, безопасный cookie/origin, Telegram web-link вход, ту же историю и logout. Агент команду не отправлял, localhost не выдаётся за публикацию.
+2. **Inbox operational risk:** воспроизвести отсутствующий старый update при pending receipt; не читать переписки/не обходить guards и не объявлять failed операцию не совершавшейся. Нужен безопасный способ карантина/операторского восстановления с сохранением intent и без uncertain inference retry. Причина текущего orphan не доказана, ручное recovery не объявляется кодовым исправлением.
+3. **Полный section7:** source/автотесты есть для27 функций, но это не полная ручная приёмка. Не проверены все реальные AI-режимы/уровни качества/границы/отрицания, второй пользователь с чужого телефона и полный cross-interface live, недельный эффект теста, реальные уведомления/quiet-hours на облаке. Web onboarding начинается в боте по утверждённой архитектуре; consent/policy ещё требуют утверждения оператором. Это не roadmap и не обещание психологического эффекта.
+4. **Операции/ресурсы:** длительный offline/reconnect/перезагрузка VM и домашнего ПК, direct/relay latency, полная RAM/VRAM нагрузка и cold/warm/local/cloud TTFT/p50/p95 ещё открыты. Изолированный offline PASS не заменяет выключение настоящего ПК, который для симуляции не останавливался. Ранее отмеченные dependency advisories не устранялись сменой стека/auto-fix.
+
+Оценка оставшегося: после доступного HTTPS — ориентир1–2ч на cross-interface ручной checkpoint и исправление конкретных найденных дефектов; это не срок устранения инфраструктурной ошибки. Адресный inbox reproduction/fix и прогоны остальных живых AI-режимов — отдельно ориентир от нескольких часов, до измерений гарантий нет. Доработки сверх прежнего срока команды не обещаны. Следующий шаг: завершить CI текущего head #24, затем получить publish и пройти перечисленные live gates. Полностью готовым продукт не объявляется.
+
+## Сохранённый предыдущий журнал
+
 # Этап 4 · runtime be95d13: реальная Gemma и сохранность после рестарта подтверждены
 
 **Развёрнутый runtime SHA: be95d13a01edd2f1b57ff6a6ea55a46cc42a50d1**, ветка `fix/stage4-structured-output`, image `between-stage4:be95d13`, digest `sha256:c934315c776794c3e4f389f7df427514ac21cc24460590432479a60c968670c0`. Эта запись заменяет текущие статусы в сохранённом журнале ниже. Контракт остаётся 2.2.1; исправления Димы b71af10 уже включены через 95f6cbc, повторно не переносились. Main/PR не слиты; новая ветка не отправлялась, remote CI нового SHA не запускался.

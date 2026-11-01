@@ -43,3 +43,12 @@ Stop: dc stop app proxy db. Не выполнять down -v: pgdata постоя
 [local-model.md](local-model.md): владелец запускает другую Windows машину, принимает Gemma terms, проверяет драйвер/VRAM, устанавливает два кандидата, firewall/ACL и endpoint key. По отдельному согласованию отключает сон на время демо и затем возвращает прежний режим. Не менять power policy автоматически.
 После reboot вручную убедиться в Tailscale login, адресах, firewall, start model и getHealth; auto-start задания добавлять только владельцем, без второго server.
 С чужого телефона: Telegram→QQCloud→реальная модель; затем веб one-time login в тот же аккаунт→та же история; изменения/прогресс туда-обратно; два пользователя изолированы. Restart сохраняет историю. Offline PC оставляет read path, generation завершается понятной ошибкой без retry/fixtures. Затем весь раздел7.
+
+
+## Инцидент test inbox, 01.11.2026
+
+На финальном test stack обнаружены старые processing/retry_wait receipts: новые claim возвращали OPERATION_IN_PROGRESS, bounded poller завершался после5 исходов без durable record. Это корректная ограниченная остановка, но не исправление причины зависшего receipt. Не отключать guards/лимиты, не запускать второй poller и не повторять неопределённую генерацию.
+
+До операторского исправления: остановить только test app, проверить pending model runs=0, сохранить pg_dump в закрытом каталоге с0600, проверить точный test DB/число/возраст receipt. Нужна явная авторизация владельца на terminal failure неоднозначного действия. В этом инциденте разрешены ровно2 receipt возрастом>5мин в between_stage4_test_5292; они отмечены failed/INTERNAL_ERROR и сняты только связанные user_update_slots. Attempts не переписаны, cursor не двигался вручную, intents/аккаунт/сессии/runs не удалялись и не менялись. Бэкап восстановлен отдельно до этого; свежий pre-recovery dump сохранён на VM.
+
+После старта штатного app проверить health, отсутствие restart loop, историю и отдельный новый preview/intent. Старый failed receipt не превращать в success и не выдавать такой operator recovery за автоматический кодовый fix. Воспроизведение потерянной повторной доставки/offset остаётся отдельным открытым gate. Не читать raw Telegram payload или model output для диагностики, не делать docker attach с сырым захватом; использовать только технические коды в источнике. Непроверенный direct smoke во время restart loop не засчитывать и автоматически не повторять.

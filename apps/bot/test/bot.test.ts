@@ -498,3 +498,12 @@ test('stage events: allowlisted names only, no user text',async()=>{
   for(const n of ['onboarding_started','onboarding_completed','preview_created','preview_confirmed','practice_completed'])assert.ok(names.includes(n),n);
   assert.ok(!JSON.stringify(h.domain.stages).includes('Позвони'));
 });
+
+test('own rating (myRating) is shown on the result buttons after a re-render',async()=>{
+  const h=new Harness();await analysed(h);
+  await h.click('Полезно');
+  const sid=[...h.domain.store.keys()][0]!;
+  await h.message('/history');await h.click(/^1\./);await h.click('Показать результат');
+  assert.ok(h.last().buttons.some(b=>b.text==='✓ Полезно'));
+  assert.ok(h.last().buttons.some(b=>b.text==='Не полезно'));void sid;
+});

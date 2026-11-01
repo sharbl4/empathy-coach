@@ -163,3 +163,17 @@ test('poller stops (fatal) when no durable outcome can be recorded, without ackn
   assert.ok(n-50000<=MAX_UNRECORDED+1);
   assert.ok(![...h.domain.receipts.keys()].some(k=>Number(k)>=50000),'nothing acknowledged');
 });
+
+test('unfinished test is not destroyed by another scenario: the user is asked to continue or reset explicitly',async()=>{
+  const h=new Harness();await h.register();
+  await h.message('/menu');await h.click('Ещё →');await h.click('Тест до/после');await h.click('Входной тест');await h.click('1');
+  await h.message('/menu');await h.click('Понять сообщение');
+  assert.match(h.lastText(),/незавершённый тест/);
+  assert.ok(h.last().buttons.some(b=>b.text==='Продолжить тест'));
+  assert.equal(h.domain.dialogues.get(h.account().id)!.navigation.kind,'assessment','answers kept');
+  // An example that goes straight to a preview must not create a session first.
+  await h.message('/menu');await h.click('Попробовать на примере');await h.click(/«Ок\.»/);
+  assert.match(h.lastText(),/незавершённый тест/);assert.equal(h.domain.store.size,0);
+  await h.click('Сбросить тест');await h.click('Да, сбросить тест');
+  await h.message('/menu');await h.click('Понять сообщение');assert.match(h.lastText(),/Пришли сообщение/);
+});

@@ -10,6 +10,7 @@ import {sourceKind} from '../preview/source';
 import {recordStage} from '../../lib/stage';
 import {cleanDraft,saveDialogue,type Dialogue,type Draft} from '../../lib/dialogue';
 import {isApiError} from '../../lib/api';
+import {AssessmentPending} from '../../components/AssessmentPending';
 
 type Mode=z.infer<typeof LearningMode>;type Ctx=z.infer<typeof ContextType>;type GoalValue=z.infer<typeof Goal>;
 interface Turn {id:string;speaker:'self'|'other';text:string}
@@ -94,7 +95,8 @@ export function ComposePage() {
     <>
       <h1>Новый разбор</h1>
       {restored&&<Notice title="Продолжаем черновик">Черновик сохранён на сервере (например, начат в боте). Изменения сохраняются автоматически.</Notice>}
-      {conflict&&<Notice tone="error" title="Черновик изменили в боте или другом окне" action={<>
+      {conflict&&conflict.navigation.kind==='assessment'&&<AssessmentPending dialogue={conflict} onResolved={next=>{dialogue.current=next;setConflict(null);}}/>}
+      {conflict&&conflict.navigation.kind!=='assessment'&&<Notice tone="error" title="Черновик изменили в боте или другом окне" action={<>
         <Button variant="secondary" onClick={()=>{dialogue.current=conflict;fill(conflict.draft);setConflict(null);}}>Загрузить их версию</Button>
         <Button variant="secondary" onClick={()=>{dialogue.current=conflict;setConflict(null);}}>Оставить мою</Button></>}>Ничего не перезаписано. Выберите, какую версию продолжить.</Notice>}
       {saveError&&<Notice tone="error">Черновик не сохранился на сервере: {saveError} Введённое остаётся на странице.</Notice>}

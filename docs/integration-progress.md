@@ -1,3 +1,37 @@
+# Этап 4 · runtime be95d13: реальная Gemma и сохранность после рестарта подтверждены
+
+**Развёрнутый runtime SHA: be95d13a01edd2f1b57ff6a6ea55a46cc42a50d1**, ветка `fix/stage4-structured-output`, image `between-stage4:be95d13`, digest `sha256:c934315c776794c3e4f389f7df427514ac21cc24460590432479a60c968670c0`. Эта запись заменяет текущие статусы в сохранённом журнале ниже. Контракт остаётся 2.2.1; исправления Димы b71af10 уже включены через 95f6cbc, повторно не переносились. Main/PR не слиты; новая ветка не отправлялась, remote CI нового SHA не запускался.
+
+## Исправление реального сбоя модели
+
+Первый live run закончился `MODEL_INVALID_OUTPUT`: невалидный ответ не сохранён как результат и не показан. Активный адаптер не передавал JSON Schema серверу. В be95d13 запрос `/v1/chat/completions` получает `response_format.type=json_schema` с полным `json_schema.schema` из Zod-контрактов для каждого типа задачи. Схема включена в template hash: старый preview нельзя молча переиспользовать. Сохранены проверки evidence, размера, токен-бюджета, reasoning/refusal/truncation; tool calls тоже отклоняются. Автоматического повтора генерации и ремонта ответа нет.
+
+Формат сверён с исходниками фактически установленного llama.cpp **b12019-1052f7e1d**: [server README](https://github.com/ggml-org/llama.cpp/blob/b12019/tools/server/README.md), [response_format parser](https://github.com/ggml-org/llama.cpp/blob/b12019/tools/server/server-common.cpp). Alias `/v1/models`: `Gemma-3-4B-IT-Q4_K_M`, server context 4096; base URL `http://100.95.63.87:8080/v1`. Ревизия весов и качество всех учебных режимов этим не аттестованы.
+
+| Проверка после AI fix | Фактический результат |
+|---|---|
+| Model unit + целевые PostgreSQL/model/learning/navigation/review/HTTP | 4 unit и 18 целевых проверок PASS, без пропусков; явные тестовые adapters, не live доказательство |
+| Lint/API typecheck | PASS |
+| Production Docker build | PASS на ПК из точного git archive be95d13; contracts/api/bot/web и browser runtime guard; VM не собирала |
+| Deploy | Архив SHA-256 на ПК и VM совпал; один app/poller, отдельные test bot/DB, прежние образы сохранены для rollback |
+| Полный набор/13 Playwright после AI fix | Не повторялись: AI-only изменение; 13 сценариев прошли на предке 95f6cbc, не выдаются за повтор на be95d13 |
+
+## Реальный checkpoint и restart
+
+Владелец на обновлённом @test_empather_bot создал новый разбор, проверил новый очищенный preview и подтвердил модель; сообщил «Результат анализа показан». Cloud DB подтвердила успешный run с matching preview revision/confirmed snapshot, completed delivery и ровно одним доменным completion event для него. Затем появился второй успешный run. Старый failed run остался failed; его не повторяли и не превращали вручную в success.
+
+Первая строгая сверка всего набора после рестарта не совпала: число успешных runs между снимками увеличилось с 1 до 2. Поэтому она не засчитана как доказательство сохранности. Повторная контролируемая проверка при pending=0 сверяла каждую исходную запись по ID и приватному отпечатку, допуская отдельно новые записи. После `restart app`: **sessions 3→3, missing0/changed0/new0; runs 3→3, missing0/changed0/new0; succeeded 2→2; run_completed events 2→2**. Текст и ответы не извлекались для показа/логирования. Полный health DB/HTTP/polling/workers/scheduler PASS, `GET /` и `/api/health/ready` →200. БД/том не пересоздавались, DB порт наружу не опубликован, firewall/маршруты организаторов не менялись.
+
+SMTP465 AUTH и app email verification ранее подтверждены; новых диагностических писем и новых генераций агентом при этой проверке не было. Это live Telegram→QQCloud→домашняя Gemma→валидированный сохранённый результат и сохранность DB после app restart. Повторное открытие результата пользователем в Telegram после этого последнего рестарта ещё требует подтверждения; live вход в веб и общая история через HTTPS пока не приняты.
+
+## Оставшиеся блокеры / точное действие
+
+Публикация блокируется ответом @gg_domains_bot «Сервис публикации временно недоступен». Фактический bind **0.0.0.0:8000**, точная команда владельца **`/publish 8000`** с подтверждением; домен **atlas.gg.qqtech.ru**, целевой WEB_ORIGIN **https://atlas.gg.qqtech.ru**. Агент боту/организаторам не писал. HTTPS пока не засчитан.
+
+Следующий ручной шаг: `/history` в test bot и открыть сохранённый успешный результат без новой генерации; затем, когда сервис организаторов восстановится, повторить publish и проверить HTTPS/web-link вход в тот же аккаунт/ту же историю. Live второй пользователь, полный раздел7, offline/reconnect/перезагрузка VM/ПК, backup restore, качество и p50/p95/RAM/VRAM ещё не приняты. Полная готовность продукта не заявляется.
+
+## Предыдущие записи (история, не текущий runtime)
+
 # Этап 4 · b71af10 интегрирован, runtime95f6cbc; email verification пройден
 
 ## Проверка нового PR23 и итоговый SHA

@@ -1,4 +1,40 @@
-# Этап 4 · публикация заблокирована площадкой, email — конфигурацией SMTP_HOST
+# Этап 4 · b71af10 интегрирован, runtime95f6cbc; email verification пройден
+
+## Проверка нового PR23 и итоговый SHA
+
+Актуальная проверенная голова PR23: **b71af104009c6710c04873f7449b53d4a3ec54cd**, `feat/api-a1-v21`, контракт2.2.1. Фактические checks GitHub contracts-and-root/web-release/domain-bot-web-integration —SUCCESS; отчёт автора не использован как единственное доказательство.
+
+**В5292e5f и291507e этого изменения не было**: ancestry=false, scoped tree diff подтвердил отсутствие новых guards. Merge9ce7c74 только повторно принимает уже включённый candidate b9d7557; его не переносили. **Единожды cherry-pick b71af10 →95f6cbcb698eac0097f4f22f6e470e832327f795** в локальной ветке `fix/stage4-assessment`. Assessment implementation/test files в95f6cbc побайтово совпадают с b71af10;291507e —предок95f6cbc, поэтому исправление static root сохранено.
+
+Перенесено только необходимое: menu не меняет сохранённые answers, переходы не уменьшают их длину без explicit reset; foreign vote/read после restart проверяются свежим domain-issued context и возвращают NOT_FOUND. Общий DTO/фасада/HTTP сигнатуры не менялись; новых миграций нет. Старый candidate, bot/web и already-owned vote projections повторно не переносились.
+
+| Проверка новой интеграции | Фактический результат |
+|---|---|
+| PostgreSQL targets: domain-review-decisions, domain-navigation, web-product, web-lifecycle, bot restart-recovery | **25PASS,0fail/0skip** на новой отдельной локальной PostgreSQL; disposable DB после проверки остановлена |
+| Lint/API typecheck | PASS |
+| Playwright | **13PASS**, включая assessment menu/reload/reset и общую историю/auth; реальные backend/HTTP/test DB с явными committed adapters |
+| Production Docker build | PASS на ПК, git archive именно95f6cbc, contracts first, api/bot/web и public runtime guard; VM не собирала |
+| Новый remote CI | Не запускался, интеграционная ветка не push/merge. Зелёный CI выше относится к b71af10, не выдаётся за CI95f6cbc |
+
+## Продолжение этапа 4
+
+**Фактически развёрнут runtime95f6cbcb698eac0097f4f22f6e470e832327f795**, image **between-stage4:95f6cbc**, digest **sha256:1566881a665980d92e9363ce8df5b28937dda5a2c36e071bc053ab4e2511cf24**. Архив на ПК/VM имеет одинаковый SHA-256; release.env и source-sha.txt обновлены до95f6cbc. Прежние5292e5f/291507e images остаются для rollback. Приватный test.env не перезаписывался агентом, SMTP исправлял владелец.
+
+Проведено последовательное пересоздание только одного test app; pending runs перед ним0. **Тот же реальный test account ID сохранился (count1), миграции11 сохранились**, HTTP `/`, `/auth/login`, `/api/health/ready`→200, полный health PASS. Ранее один служебный Compose-exec health check превысил10s; это не было успешной проверкой. Повтор напрямую через Docker с30s deadline и ожиданием первого long-poll прошёл; guards/health код не отключались. DB/volume, test token и модель не менялись. DB по-прежнему не опубликована наружу; app bind0.0.0.0:8000.
+
+### SMTP исправлен и реальный email путь подтверждён
+
+Промежуточные состояния не скрываются: после исправления SMTP_HOST DNS/TLS стали рабочими, но SMTP AUTH отклонял credentials535. Владелец исправил SMTP_USER/PASSWORD прямо в закрытом env; новый одноразовый контейнер подтвердил **TLS465 PASS/AUTH235 PASS без MAIL/RCPT/DATA**. App пересоздан для перечитывания новых env, env secrets/независимые auth keys сохранены.
+
+Затем владелец явно запросил повторный код в боте и сообщил «Почта подтверждена». Реальная test DB подтвердила **accounts1/verified1/consumed_challenges1**. Это уже app email verification, не прежнее диагностическое письмо. Адрес, код и body не извлекались/не печатались; новых диагностических писем не отправлялось.
+
+### Что пока не принято
+
+Владелец запрошен выполнить анализ вымышленной фразы «Ок, давай обсудим завтра», проверив полный очищенный preview и подтвердив генерацию в @test_empather_bot. На последнем метаданном снимке: verified1, sessions0/runs0. Реальный model result/его сохранность после restart пока **не подтверждены**; подтверждена сохранность аккаунта и schema records, не выдуманная история. Генерация агентом не запускалась, verification не обходилась.
+
+Публикация по-прежнему отдельно блокируется ответом @gg_domains_bot «Сервис публикации временно недоступен»; точная команда остаётся **`/publish 8000`**, домен atlas.gg.qqtech.ru, целевой origin https://atlas.gg.qqtech.ru. Успешного HTTPS ещё нет. Инфраструктурный firewall/маршруты не менялись. После успешного synthetic run —проверить pending0, снять технический snapshot без содержимого, restart только test app и проверить сохранённый результат; после восстановления publish сервиса —тот же путь через HTTPS. Main/PR не слиты/не закрыты, полный аудит архитектуры не повторялся.
+
+## Предыдущая диагностика — сохранённый журнал
 
 ## Последние результаты диагностики
 

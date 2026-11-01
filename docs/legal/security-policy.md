@@ -1,4 +1,8 @@
+> HISTORICAL DRAFT telegram-1: transport/no-site assertions replaced by web+Telegram. Independent protection requirements remain draft guidance. Not an approved web-telegram-2 policy; do not publish as current consent.
+
 # Политика информационной безопасности «Между строк»
+
+> TELEGRAM-ONLY 31.10.2026: старые строки о Supabase/browser/PR#9 описывают прежний аудит. Актуальные обязательные меры — private sender→verified domain context, ownership/revision, одноразовые SMTP-коды, один poller с lease, local-only model без reasoning/логов, Tailscale ACL и Windows firewall. Источники правил защиты/инцидентов/удаления ниже сохраняют силу; статусы прежней реализации не подтверждают новую. См. ../architecture.md и ../acceptance.md.
 
 Версия 0.1 от 31.10.2026. **Внутренний проект требований.** Утверждает оператор Неделько Антон. Контакт для сообщений об уязвимостях: antonnedelko@outlook.com. Не направлять на этот адрес реальные переписки, секреты и выгрузки БД; сначала прислать безопасное описание и согласовать канал.
 

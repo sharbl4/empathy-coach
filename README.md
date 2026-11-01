@@ -1,55 +1,38 @@
-# Между строк
+# Empather
 
-Foundation v0.1.0 для полной v1 по [hackathon-prompts.md](hackathon-prompts.md).
-В main приняты foundation, серверное хранение, runs/GigaChat и учебные API. Веб-аккаунты проходят отдельное review; живой вход пользователя и результат генерации не считаются проверенными. OAuth/список моделей и подключение к сервисам проверены отдельно, это не полный live-путь.
+Команда **shertwg^3**. Хакатон «Город героев», тема «Чувствовать». Целевой продукт: веб и Telegram — с одним аккаунтом, историей и доменом.
 
-Node 24.22.1 LTS (`.nvmrc`), npm workspaces. Точные зависимости и транзитивные версии — package-lock.json.
+Решение Антона31.10.2026 заменяет Telegram-only/архив apps/web. Supabase Auth, GigaChat и hosted inference не возвращаются. QQCloud1CPU/2ГБ: PostgreSQL и один app-процесс Fastify+polling+workers. Fastify обслуживает web/dist и /api с одного origin; bot вызывает фасаду напрямую. Windows GPU-PC через private network выполняет локальную модель.
+
+## Актуальный финальный кандидат
+
+Финальная ветка `feat/final-defense` объединяет проверенную интеграцию и последний патч участников. Точный runtime/PR, свежие результаты и live-блокеры: [журнал](docs/integration-progress.md). [Маршрут защиты](docs/demo-final.md). Старые SHA/статусы ниже сохранены как исходная точка, а не текущая аттестация. Продукт тренирует общение; не обещает доказанного роста эмпатии или диагностики.
+
+## Старт и контракт
+
+Основа ed7278474e42dbf67624c7e241b9cd16253d8b65/PR18 сохранена. Текущий контракт A1 2.2.1 —9cd742f, @between/contracts/product и /http; [совместимое дополнение](docs/contract-v2.2.1.md). Общий исполняемый candidate `test/stack-a1-nov01`/6755408 включает backend fabed23 и interfaces f12d309. Точная передача: [handoff](docs/handoff-v2.md).
+Полный обязательный [продукт](docs/product.md), [архитектура](docs/architecture.md), [приёмка](docs/acceptance.md).
+В candidate есть настоящие facade/HTTP/bot/web: общая сборка, PostgreSQL/HTTP и13 browser-сценариев проверены; Supabase отсутствует в активном клиенте и production dependencies. PR22/23 отдельно не слиты. Контрактная ветка без candidate не является полной исполняемой поставкой. Release guard и обязательные CI jobs сохранены; live Telegram/QQCloud/GPU этим не подтверждаются.
 
 ```sh
 npm ci
-cp .env.example .env
-docker compose up -d db
-npm run dev
-```
-
-В PowerShell вместо cp: `Copy-Item .env.example .env`. Web: http://localhost:5173; API: http://localhost:3000.
-Vite проксирует /api; production Fastify отдаёт web/dist с одного origin.
-Не заполняйте env секретами в Git. Пустые Supabase/GigaChat настройки означают отсутствие подключённых сервисов.
-
-```sh
-npm run lint
+npm run test:contracts
+npm run build:web
 npm run typecheck
-npm test
-npx playwright install chromium
-npm run e2e
 npm run build
+docker compose up -d db
+npm run db:migrate
+npm run dev
 npm start
+npm run e2e
 ```
 
-Contracts всегда собирается первым. E2E проверяет браузер и настоящий HTTP технического каркаса, не полную v1.
-Для release используйте корневой `npm run build`: web собирается с явным NODE_ENV=production даже при dev .env или test CI. CI дополнительно передаёт VITE_API_MODE=fixtures и проверяет, что fixture-адаптеров нет в production артефактах и регистрации. Это не проверка живой регистрации/писем.
-После build `npm run db:migrate` запускает принятый мигратор Димы с .env: checksum истории, advisory lock и транзакции. Для DB-тестов нужны NODE_ENV=test и отдельный TEST_DATABASE_URL, отличный от DATABASE_URL. В CI DB-тесты обязательны; локальный skip не является DB-проверкой.
+Node24.22.1 LTS, npm workspaces TS/React/Vite/Fastify/Zod/pg. Contracts первыми. Production web build принудительно NODE_ENV=production, без fixture/bypass/legacy Auth. Browser public env только VITE_PUBLIC_*; API same-origin /api. Секреты не VITE и не в клиенте.
 
-```sh
-docker build -t empathy-coach:foundation .
-docker run --rm --env-file .env -p 3000:3000 empathy-coach:foundation
-```
+Существующий .env и IDE не перезаписываются. Новые параметры заполняет владелец локально/hosting по .env.example; dev/test/prod разделены, test bot/DB отдельные. Веб входит по одноразовой ссылке из своего бота с явным POST-подтверждением, пароли не нужны; cookies HttpOnly/Secure/SameSite, Origin+CSRF и одноразовая browser binding.
 
-В контейнере DATABASE_URL должен указывать на доступную внешнюю БД, не localhost.
-Подробности: [контракт](docs/api.md), [архитектура и SQL](docs/architecture.md), [приёмка](docs/acceptance.md), [деплой и доступы](docs/deploy.md), [передача](docs/handoff.md).
+На этом рабочем ПК Intel Graphics/около16ГБ; RTX3070Ti/32ГБ — другой ПК владельца. Локального GPU на этом ПК нет; домашний ПК и QQCloud проверяются отдельно, фактические live-результаты см. в журнале. Gemma3 4B Q4_K_M и Qwen3-4B-Instruct-2507 сравниваются после принятия владельцем условий и фактических замеров, не выбираются по обещанию5с.
 
-Основной хостинг — облако организаторов. Публичный staging URL пока не предоставлен.
+[Runbook](docs/runbook.md), [модель](docs/local-model.md), [локальная передача/оценка](docs/handoff-v2.md), [демо](docs/demo.md). Старые plans/legacy tests сохранены, но не описывают новый runtime.
 
-В текущей Windows-папке Node скачан с nodejs.org и проверен по официальному SHA256; переносимая копия игнорируется Git. Для этой копии перед командами:
-
-```powershell
-$env:Path = "$PWD\.tools\node-v24.22.1-win-x64;$env:Path"
-npm.cmd run dev
-```
-
-В новом clone установите Node версии `.nvmrc`. Private GitHub: https://github.com/sharbl4/empathy-coach.
-
-Настройка Supabase Auth/SMTP, GigaChat и локальная контрольная точка: [docs/services.md](docs/services.md).
-Проекты политики конфиденциальности, отдельного согласия и правил безопасности для веба и планируемого Telegram-бота: [docs/legal/README.md](docs/legal/README.md). До публичного сбора данных нужно закрыть указанные там условия; наличие документов не подтверждает соответствие текущих внешних сервисов требованиям РФ.
-`npm run services:check` проверяет доступность без генерации; `npm run checkpoint:live` — явный live-путь после готовности модулей и dev/test env. Foundation CI не подтверждает этот путь.
-Эти команды, а также root dev/start используют launcher: CA из NODE_EXTRA_CA_CERTS применяется при старте дочернего Node. Если для GigaChat нужен официальный CA, укажите абсолютный локальный путь в .env; настройка описана в docs/services.md. Access token вручную не задаётся.
+Server env validators только @between/contracts/runtime, browser export запрещён; /product и /http не импортируют runtime. [Новые persistent dialogue и support правила](docs/contract-v2.2.md), [review PR21/22](docs/review-pr21.md).

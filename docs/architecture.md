@@ -1,37 +1,24 @@
-# Архитектура и SQL: исходное предложение v0.1.0
+# Архитектура web + Telegram v2
 
-React/Vite → Supabase Auth (только аккаунты); React → Fastify /api с Bearer → PostgreSQL и GigaChatProvider.
-Production — один постоянный Node-процесс, web+api один origin. Dev — Vite proxy.
-Без Redis/микросервисов/дополнительного оркестратора. Фоновые runs требуют постоянно работающего процесса.
+Решение Антона31.10.2026 заменяет Telegram-only. apps/web рабочий, auth/HTTP — Дима, web+bot — Даня; root/contracts/CI/model/deploy — Антон.
 
-Backend вызывает auth.getUser(token), использует только проверенный userId. Auth outage закрывает доступ.
-Чужие ID и чужие вложенные ссылки возвращают 404. Параметризованный pg SQL, схема app закрыта от Data API и клиентских ролей.
-Зависимости foundation: pg 8.16.3 и @supabase/supabase-js 2.76.1 в обоих apps. Дима подтвердил DTO/версии/retry-семантику в PR #1; Антон проверил SQL и принял storage после реальных PostgreSQL-тестов.
+```text
+Browser HTTPS → reverse proxy → Fastify /api + web/dist
+Telegram private updates → polling ─┐
+                                  ├→ один ProductFacade → PostgreSQL
+HTTP verified session → UserContext┘                 └→ private network → Windows llama.cpp
+```
 
-| Таблица | Поля и ограничения |
-|---|---|
-| profiles | id=Auth UUID PK, display_name, onboarding_completed_at, created_at |
-| sessions | id UUID PK, user_id, title, situation JSONB, guess JSONB, revision>0, created_at, updated_at |
-| ai_runs | id UUID PK, session_id FK CASCADE, user_id, revision, kind, status, input/output JSONB, prompt_version, error_code, idempotency_key, payload_hash, created_at, updated_at |
-| roleplays | id UUID PK, session_id FK CASCADE, user_id, revision, status, turn_count 0..3, feedback JSONB, created_at, updated_at |
-| roleplay_messages | id UUID PK, roleplay_id FK CASCADE, sequence, role, content, created_at |
-| practice_events | id UUID PK, user_id, session_id FK CASCADE, source_run_id/source_roleplay_id, kind, skill, created_at |
+Один app Node-процесс с HTTP/polling/workers/scheduler; отдельный PG, допустим HTTPS proxy. Нет Supabase/GigaChat/hosted inference. Домен не импортирует transport, factory/import не запускает workers/HTTP. Root scripts/application.mjs явно связывает side-effect-free @between/api.createDomain, @between/api/http.createHttpAdapter, @between/bot.createTelegramTransport.
 
-Индексы: sessions(user_id,updated_at DESC,id DESC), ai_runs(session_id,revision,kind); UNIQUE(user_id,idempotency_key), UNIQUE(roleplay_id,sequence), уникальный источник события практики.
-Дима определяет миграциями FK/check/partial unique индексы. Одна pending AI-операция на сессию; транзакционные блокировки на turn/finish/retry/revision.
-Сортировка истории: updated_at DESC,id DESC. Cursor — непрозрачный base64url от пары timestamp/UUID; сервер валидирует содержимое и всегда ограничивает user_id. При обновлении страниц история может смещаться.
+Identity: Telegram private sender либо opaque server web session; domain-issued UserContext с runtime issuer/account checks. Никакого body ownerId, username/email merge или localStorage authority. Один аккаунт/UUID и одна история в обеих UI. Новые миграции только вперёд, существующие данные не переписываются.
 
-Idempotency hash включает метод, ресурс и нормализованный body. Проверка владельца выполняется до возврата старого run.
-Старый ключ+тот же payload возвращает прежний run; другой payload — 409. Failed retry — новый ключ.
-Roleplay retry принимает только failed roleplay-run текущей revision, отвечает на сохранённое сообщение без нового user message.
-Третий ответ сразу приводит к feedback, не к четвёртой реплике; finish после ≥1 ответа. Для failed финала используется тот же retry.
-Внешний вызов вне SQL-транзакции; поздний output сохраняется только при существующей сессии, текущей revision и актуальном pending run.
-На старте потерянные pending → failed/RUN_INTERRUPTED без автоматического платного повтора.
-Редактирование и удаление одной pending-сессии — 409; удаление всех данных отменяет pending и исключает позднее восстановление.
-Прогресс по уникальным успешным событиям, каскадное удаление учитывается в счётчиках.
+Auth/preview/idempotency/inbox/outbox: [контракт v2](contract-v2.md). До подтверждения полного очищенного snapshot/hash/revision/model/prompt ни одной генерации. Лимит4k включает template/system/input/output/reserve, разные output caps для задач. Model offline не мешает истории/аккаунту/карточкам. Queue bounded, concurrency1, неопределённый run не повторяется автоматически.
 
-Мигратор Димы принят в PR #1: checksum версий, advisory lock, транзакции; применённые SQL не менять. Миграции запускаются отдельным release-шагом, а не скрыто при старте приложения.
-Не логировать body/ответы/Authorization. Текущий каркас отключает logger; в будущем только безопасные requestId/runId/code.
-GigaChat: один вызов/run, bounded queue, timeout и concurrency. Токен кешируется, один refresh одновременно. Strict JSON schema из Zod и повторная серверная валидация. Цитаты analysis сверять с message, feedback с draft. TLS проверять, CA при необходимости добавить, не отключать.
+Один poller actual botId с DB lease; HTTP не вызывает Telegram handler через fake bearer. Delivery/scheduler opt-in и durable; DST/quiet hours/local dates не зависят от TZ сервера. Сессии/cookies/preview/assessment имеют ownership и атомарные проверки.
 
-Официальные источники: [Fastify 5](https://fastify.dev/docs/latest/Reference/Server/), [fastify-static compatibility](https://github.com/fastify/fastify-static), [Vite 7](https://v7.vite.dev/guide/), [Zod 4](https://zod.dev/api), [Supabase getUser](https://supabase.com/docs/reference/javascript/auth-getuser), [GigaChat](https://developers.sber.ru/docs/ru/gigachat/guides/structured-output). Точные runtime версии закреплены manifests/lockfile и проверяются совместным запуском.
+Shutdown/partial start: stop accepting, остановить polling/HTTP, abort/drain workers/model requests с лимитом, finally закрыть delivery/scheduler/leases/pool. Health учитывает HTTP/polling/workers/scheduler/DB, не требует доступной модели для чтения истории. Никаких raw URLs/cookies/payload в логах.
+
+QQCloud1CPU/2ГБ требует проверки постоянного процесса/диска/HTTPS; Telegram domain bot этого не доказывает. Начальные caps app640MiB, db512MiB, proxy64MiB оставляют~832MiB ОС, pool target5; не замер. Image собирается на ПК/CI, не VM. PG/model порты не опубликованы, proxy trust exact IP only. Модель слушает private IP, ACL+Windows firewall разрешают только cloud node.
+
+A1 2.2 boundary: @between/contracts/runtime server-only export, browser:null; no public re-export. Dialogue owns transient draft/navigation (idle1h,absolute24h); supportRegion account setting is separate and user-selected, not inferred. Full rules contract-v2.2.md.

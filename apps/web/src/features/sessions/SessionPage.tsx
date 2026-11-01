@@ -1,194 +1,121 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useServices } from '../../app/context';
-import { navigate, useLocation } from '../../app/router';
-import { Modal } from '../../components/Modal';
-import { Button, Loading, Notice } from '../../components/ui';
-import type { Run, SessionDetail } from '../../lib/api/client';
-import { ApiFailure, errorMessage, isAbort, runErrorMessages } from '../../lib/api/errors';
-import { finishIntent, intentKey } from '../../lib/intents';
-import { useRunPolling } from '../../lib/useRunPolling';
-import { AnalysisView } from './AnalysisView';
-import { goalLabel } from './model';
+import {useSavedAttempt} from '../../lib/useSavedAttempt';
+import {useState} from 'react';
+import type {z} from 'zod';
+import type {Difficulty,PreviewSource} from '@between/contracts/product';
+import {Link,navigate} from '../../app/router';
+import {Modal} from '../../components/Modal';
+import {Button,Loading,Notice,TextArea} from '../../components/ui';
+import {api,errorText,newKey} from '../../lib/api';
+import {contextLabels,difficultyLabels,formatDate,goalLabels,kindLabels,modeLabels} from '../../lib/labels';
+import {useAsync} from '../../lib/useAsync';
+import {sourceKind} from '../preview/source';
+import {RunResult} from '../runs/RunResult';
+import {EditSession} from './EditSession';
+import {recordStage} from '../../lib/stage';
+import type {RunV2} from '@between/contracts/product';
 
-type AnalysisRun = Extract<Run, { kind: 'analysis' }>;
+type Source=z.infer<typeof PreviewSource>;type Level=z.infer<typeof Difficulty>;
 
-/** Latest analysis run of the current revision. Older revisions are never shown as current. */
-function currentAnalysis(detail: SessionDetail): AnalysisRun | null {
-  const runs = detail.runs.filter((run): run is AnalysisRun => run.kind === 'analysis' && run.revision === detail.revision);
-  runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return runs[0] ?? null;
+export function SessionPage({id}:{id:string}) {
+  const detail=useAsync(signal=>api('session',{id},{signal}),[id]);
+  const saved=useSavedAttempt({step:'compose',sessionId:id});
+  const draft=saved.text,setDraft=saved.change,answer=saved.extraText,setAnswer=saved.changeExtra;const [level,setLevel]=useState<Level>('calm');
+  const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);const [confirmDelete,setConfirmDelete]=useState(false);
+  const [editing,setEditing]=useState(false);
+  const [moreRuns,setMoreRuns]=useState<{items:z.infer<typeof RunV2>[];cursor:string|null}|null>(null);
+  if(detail.loading&&!detail.data)return <Loading label="Загружаем ситуацию"/>;
+  if(!detail.data)return <Notice tone="error" action={<Button variant="secondary" onClick={detail.reload}>Повторить</Button>}>{errorText(detail.error)}</Notice>;
+  const s=detail.data,i=s.input;
+  const current=s.runs.items.filter(r=>r.revision===s.revision);
+  const main=current.find(r=>r.kind===sourceKind(i.mode));
+  const analysed=main?.kind==='analysis'&&main.status==='succeeded';
+  const exercise=current.find(r=>r.kind==='exercise'&&r.status==='succeeded');
+  const preview=async(name:string,source:Source)=>{
+    setBusy(name);setError(null);
+    try{const p=await api('createPreview',source,{key:newKey()});recordStage('preview_created',{contextType:i.contextType,resourceId:p.id});navigate(`/previews/${p.id}`);}
+    catch(e){setError(errorText(e));setBusy(null);}
+  };
+  const loadMore=async()=>{
+    const cursor=moreRuns?moreRuns.cursor:s.runs.nextCursor;if(!cursor)return;
+    try{const page=await api('runs',{sessionId:s.id,cursor,limit:20});setMoreRuns({items:[...(moreRuns?.items??[]),...page.items],cursor:page.nextCursor});}catch(e){setError(errorText(e));}
+  };
+  const remove=async()=>{
+    setBusy('delete');setError(null);
+    try{await api('deleteSession',{id:s.id,expectedRevision:s.revision},{key:newKey()});navigate('/history',{replace:true});}
+    catch(e){setError(errorText(e));setBusy(null);setConfirmDelete(false);detail.reload();}
+  };
+  const body=i.mode==='understand'?<p className="message">{i.message}</p>:i.mode==='thread'?<ol className="turns">{i.turns.map(t=><li key={t.id} className={`turn turn-${t.speaker}`}><strong>{t.speaker==='self'?'Я':'Собеседник'}</strong><span>{t.text}</span><span/></li>)}</ol>:<p className="message">{i.draft}</p>;
+  const base={sessionId:s.id,expectedRevision:s.revision};
+  return (
+    <>
+      <div className="page-head"><h1>{i.title}</h1><div className="actions"><Button variant="secondary" onClick={()=>setEditing(true)}>Изменить</Button><Button variant="danger" onClick={()=>setConfirmDelete(true)}>Удалить</Button></div></div>
+      {editing&&<EditSession session={s} onCancel={()=>setEditing(false)} onSaved={()=>{setEditing(false);setMoreRuns(null);detail.reload();}}/>}
+      <p className="small muted">{modeLabels[i.mode]} · обновлено {formatDate(s.updatedAt)} · версия {s.revision}</p>
+      {body}
+      <dl className="meta"><dt>Собеседник</dt><dd>{i.relationship}</dd><dt>Сфера</dt><dd>{contextLabels[i.contextType]}</dd><dt>Цель</dt><dd>{goalLabels[i.goal]}</dd>{i.context&&<><dt>Контекст</dt><dd>{i.context}</dd></>}{i.mode==='say_direct'&&i.intent&&<><dt>Что выразить</dt><dd>{i.intent}</dd></>}</dl>
+      {error&&<Notice tone="error">{error}</Notice>}
+      <section className="card">
+        <h2>Результат</h2>
+        {!main&&<><p>Разбор ещё не запускался.</p><Button busy={busy==='main'} onClick={()=>void preview('main',{kind:sourceKind(i.mode),...base})}>Подготовить предпросмотр</Button></>}
+        {main?.status==='pending'&&<p><Link to={`/runs/${main.id}`}>Запрос выполняется — открыть</Link></p>}
+        {main?.status==='failed'&&<p><Link to={`/runs/${main.id}`}>Не удалось — открыть и повторить</Link></p>}
+        {main?.status==='succeeded'&&<><RunResult run={main}/><p><Link to={`/runs/${main.id}`}>Открыть с подсветкой и оценкой</Link></p></>}
+      </section>
+      {analysed&&<section className="card">
+        <h2>Практика по этой ситуации</h2><p className="small" role="status">{saved.status}</p>
+        <TextArea label="Ваш черновик ответа" hint="Сначала свой вариант — так полезнее." value={draft} maxLength={3000} counter={{value:draft.length,max:3000}} onChange={e=>setDraft(e.target.value)}/>
+        <div className="actions">
+          <Button busy={busy==='reply'} disabled={!draft.trim()} onClick={()=>void preview('reply',{kind:'reply_feedback',...base,draft:draft.trim()})}>Разобрать черновик</Button>
+          <Button variant="secondary" busy={busy==='examples'} onClick={()=>void preview('examples',{kind:'reply_examples',...base})}>Нужен пример</Button>
+          <Button variant="secondary" busy={busy==='clarify'} onClick={()=>void preview('clarify',{kind:'clarify',...base})}>Ещё уточняющие вопросы</Button>
+        </div>
+        <h3>Упражнение 30–60 секунд</h3>
+        {exercise&&exercise.kind==='exercise'&&exercise.status==='succeeded'?<>
+          <RunResult run={exercise}/>
+          <TextArea label="Ваша попытка" value={answer} maxLength={3000} onChange={e=>setAnswer(e.target.value)}/>
+          <div className="actions"><Button busy={busy==='answer'} disabled={!answer.trim()} onClick={()=>void preview('answer',{kind:'exercise_feedback',...base,exerciseRunId:exercise.id,answer:answer.trim()})}>Получить отзыв</Button>
+          <Button variant="secondary" busy={busy==='exercise'} onClick={()=>void preview('exercise',{kind:'exercise',...base})}>Другое упражнение</Button></div>
+        </>:<Button variant="secondary" busy={busy==='exercise'} onClick={()=>void preview('exercise',{kind:'exercise',...base})}>Получить упражнение</Button>}
+        <h3>Тренировка разговора</h3>
+        <p className="small muted">Три ваших ответа, закончить можно после первого.</p>
+        <div className="row"><div className="field"><label htmlFor="level">Собеседник</label><select id="level" value={level} onChange={e=>setLevel(e.target.value as Level)}>{Object.entries(difficultyLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>
+          <Button variant="secondary" busy={busy==='role'} onClick={()=>void preview('role',{kind:'roleplay_start',...base,difficulty:level})}>Начать тренировку</Button></div>
+        {s.roleplays.items.length>0&&<ul>{s.roleplays.items.map(r=><li key={r.id}><Link to={`/roleplays/${r.id}`}>{difficultyLabels[r.difficulty]} · {r.status==='active'?`ответов ${r.turnCount}/3 — продолжить`:'завершена'}</Link></li>)}</ul>}
+      </section>}
+      {current.length>0&&<section className="card"><h2>Все запросы этой версии</h2><ul>{[...current,...(moreRuns?.items??[]).filter(r=>r.revision===s.revision)].map(r=><li key={r.id}><Link to={`/runs/${r.id}`}>{kindLabels[r.kind]}</Link> · {r.status==='succeeded'?'готово':r.status==='failed'?'не удалось':'выполняется'}</li>)}</ul>{(moreRuns?moreRuns.cursor:s.runs.nextCursor)&&<Button variant="secondary" onClick={()=>void loadMore()}>Показать ещё</Button>}</section>}
+      <Modal open={confirmDelete} title="Удалить ситуацию?" onClose={()=>setConfirmDelete(false)} actions={<><Button variant="danger" busy={busy==='delete'} onClick={()=>void remove()}>Удалить</Button><Button variant="secondary" onClick={()=>setConfirmDelete(false)}>Отмена</Button></>}>
+        <p>Удалятся ситуация, разборы и практика по ней — и на сайте, и в боте. Сообщения в чате Telegram останутся, их можно удалить только в Telegram.</p>
+      </Modal>
+    </>
+  );
 }
 
-const formatDate = (iso: string) => new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-
-export function SessionPage({ id }: { id: string }) {
-  const { api } = useServices();
-  const { search } = useLocation();
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [loadError, setLoadError] = useState<ApiFailure | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  const [pendingRunId, setPendingRunId] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const startingRef = useRef(false);
-  const autoStarted = useRef(false);
-  const { state: poll, resume } = useRunPolling(pendingRunId);
-
-  // Load (and reload) the saved session; a refresh restores everything from the server.
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoadError(null);
-    api.session(id, controller.signal)
-      .then(next => {
-        setDetail(next);
-        const run = currentAnalysis(next);
-        setPendingRunId(run?.status === 'pending' ? run.id : null);
-      })
-      .catch(error => { if (!isAbort(error)) setLoadError(error instanceof ApiFailure ? error : new ApiFailure('network')); });
-    return () => controller.abort();
-  }, [api, id, attempt]);
-
-  // A finished poll is merged into the detail, but only if it belongs to the revision on screen.
-  useEffect(() => {
-    if (poll.phase !== 'done') return;
-    setDetail(previous => previous && poll.run.sessionId === previous.id
-      ? { ...previous, runs: [...previous.runs.filter(run => run.id !== poll.run.id), poll.run] }
-      : previous);
-    setPendingRunId(null);
-  }, [poll]);
-
-  const startAnalysis = useCallback(async (target: SessionDetail) => {
-    if (startingRef.current) return;
-    startingRef.current = true;
-    setStarting(true);
-    setStartError(null);
-    const scope = `analyze:${target.id}:${target.revision}`;
-    const key = intentKey(scope, { expectedRevision: target.revision });
-    try {
-      const accepted = await api.analyze(target.id, target.revision, key);
-      finishIntent(scope);
-      setPendingRunId(accepted.runId);
-    } catch (error) {
-      if (!(error instanceof ApiFailure && error.retryable)) finishIntent(scope);
-      if (error instanceof ApiFailure && (error.code === 'REVISION_CONFLICT' || error.code === 'OPERATION_IN_PROGRESS')) setAttempt(value => value + 1);
-      setStartError(errorMessage(error));
-    } finally {
-      startingRef.current = false;
-      setStarting(false);
-    }
-  }, [api]);
-
-  // Right after creation (?start=1) the analysis starts once; the flag is then removed from the URL.
-  useEffect(() => {
-    if (!detail || autoStarted.current || !new URLSearchParams(search).has('start')) return;
-    autoStarted.current = true;
-    navigate(`/sessions/${id}`, { replace: true, force: true });
-    if (!currentAnalysis(detail)) void startAnalysis(detail);
-  }, [detail, id, search, startAnalysis]);
-
-  async function remove() {
-    if (!detail) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await api.deleteSession(detail.id);
-      navigate('/history', { replace: true, force: true });
-    } catch (error) {
-      setDeleteError(errorMessage(error));
-      setDeleting(false);
-    }
-  }
-
-  if (loadError) {
-    return (
-      <section className="page">
-        <h1>Разбор</h1>
-        <Notice tone="error" action={loadError.code === 'NOT_FOUND'
-          ? <Button variant="secondary" onClick={() => navigate('/history')}>К истории</Button>
-          : <Button variant="secondary" onClick={() => setAttempt(value => value + 1)}>Повторить</Button>}>
-          {loadError.message}
-        </Notice>
-      </section>
-    );
-  }
-  if (!detail) return <section className="page"><Loading label="Загружаем разбор…" /></section>;
-
-  const analysis = currentAnalysis(detail);
-  const hasOlder = detail.runs.some(run => run.kind === 'analysis' && run.revision !== detail.revision);
-  const waiting = pendingRunId !== null || analysis?.status === 'pending';
-  const { situation, guess } = detail;
-
+export function RoleplayPage({id}:{id:string}) {
+  const role=useAsync(signal=>api('roleplay',{id},{signal}),[id]);
+  const saved=useSavedAttempt({step:'roleplay',roleplayId:id,sessionId:role.data?.sessionId});
+  const text=saved.text,setText=saved.change;const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
+  if(!role.data)return role.loading?<Loading label="Загружаем тренировку"/>:<Notice tone="error">{errorText(role.error)}</Notice>;
+  const r=role.data;
+  const go=async(name:string,build:(revision:number)=>Source)=>{
+    setBusy(name);setError(null);
+    try{const p=await api('createPreview',build(r.revision),{key:newKey()});navigate(`/previews/${p.id}`);}
+    catch(e){setError(errorText(e));setBusy(null);}
+  };
   return (
-    <section className="page">
-      <p className="eyebrow">{goalLabel(situation.goal)} · {formatDate(detail.updatedAt)}{detail.revision > 1 ? ` · версия ${detail.revision}` : ''}</p>
-      <h1>{detail.title}</h1>
-
-      <div className="two-col">
-        <article className="card">
-          <h2>Сообщение</h2>
-          <blockquote className="message">{situation.message}</blockquote>
-          <dl className="meta">
-            <dt>Кто написал</dt><dd>{situation.relationship}</dd>
-            {situation.context && <><dt>Контекст</dt><dd>{situation.context}</dd></>}
-            <dt>Цель ответа</dt><dd>{goalLabel(situation.goal)}</dd>
-          </dl>
-        </article>
-        <article className="card">
-          <h2>Ваша версия</h2>
-          {guess.unsure && guess.emotions.length === 0
-            ? <p>Не понимаю, что чувствует собеседник.</p>
-            : <p>{guess.emotions.join(', ')}{guess.unsure ? ' (не уверены)' : ''}</p>}
-          {guess.evidenceQuotes.length > 0 && <ul className="quote-list">{guess.evidenceQuotes.map(quote => <li key={quote}><q>{quote}</q></li>)}</ul>}
-        </article>
-      </div>
-
-      <section className="card analysis" aria-labelledby="analysis-title" aria-busy={waiting || undefined}>
-        <h2 id="analysis-title">Разбор</h2>
-        {hasOlder && <p className="muted">Результаты прежней версии ситуации здесь не показаны.</p>}
-
-        {waiting && poll.phase !== 'lost' && (
-          <>
-            <Loading label="Разбираем сообщение… обычно это занимает до минуты." />
-            <p className="muted">Можно уйти со страницы: результат сохранится и будет ждать в истории.</p>
-          </>
-        )}
-        {waiting && poll.phase === 'lost' && (
-          <Notice tone="error" action={<Button variant="secondary" onClick={resume}>Проверить снова</Button>}>{poll.message}</Notice>
-        )}
-
-        {!waiting && analysis?.status === 'succeeded' && <AnalysisView analysis={analysis.output} guess={guess} />}
-
-        {!waiting && analysis?.status === 'failed' && (
-          <Notice tone="error" title="Разбор не получился" action={<Button onClick={() => startAnalysis(detail)} busy={starting}>Повторить разбор</Button>}>
-            {runErrorMessages[analysis.errorCode]} Ваши данные сохранены.
-          </Notice>
-        )}
-
-        {!waiting && !analysis && (
-          <>
-            <p className="muted">Разбор ещё не запускался.</p>
-            <Button onClick={() => startAnalysis(detail)} busy={starting}>Запустить разбор</Button>
-          </>
-        )}
-        {startError && <Notice tone="error" title="Не удалось запустить разбор">{startError}</Notice>}
-      </section>
-
-      <div className="actions">
-        <Button variant="secondary" onClick={() => navigate('/history')}>К истории</Button>
-        <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={waiting}>Удалить разбор</Button>
-      </div>
-      {waiting && <p className="muted small">Удалить можно после завершения разбора.</p>}
-
-      <Modal open={confirmDelete} title="Удалить разбор?" onClose={() => setConfirmDelete(false)} actions={<>
-        <Button variant="danger" onClick={remove} busy={deleting}>Удалить</Button>
-        <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>Отмена</Button>
-      </>}>
-        <p>Будут удалены сообщение, ваша версия и все результаты этого разбора. Отменить нельзя.</p>
-        {deleteError && <Notice tone="error">{deleteError}</Notice>}
-      </Modal>
-    </section>
+    <>
+      <h1>Тренировка разговора</h1>
+      <p className="muted">Собеседник: {difficultyLabels[r.difficulty]} · ответов {r.turnCount} из 3</p>
+      <p><Link to={`/sessions/${r.sessionId}`}>← К ситуации</Link></p>
+      <ul className="chat">{r.messages.map(m=><li key={m.id} className={`from-${m.role}`}><span className="sr-only">{m.role==='user'?'Вы':'Собеседник'}: </span>{m.content}</li>)}</ul>
+      {r.status==='completed'&&r.feedback&&<section className="card"><h2>Итог</h2><RunResult run={{kind:'roleplay_feedback',status:'succeeded',output:r.feedback} as never}/></section>}
+      {r.status==='active'&&<>
+        {error&&<Notice tone="error">{error}</Notice>}
+        <TextArea label={`Ваш ответ ${r.turnCount+1} из 3`} value={text} maxLength={3000} onChange={e=>setText(e.target.value)} disabled={r.turnCount>=3}/><p className="small" role="status">{saved.status}</p>
+        <div className="actions">
+          <Button busy={busy==='turn'} disabled={!text.trim()||r.turnCount>=3} onClick={()=>void go('turn',rev=>({kind:'roleplay_turn',roleplayId:r.id,expectedRevision:rev,content:text.trim()}))}>Ответить</Button>
+          {r.turnCount>0&&<Button variant="secondary" busy={busy==='finish'} onClick={()=>void go('finish',rev=>({kind:'roleplay_feedback',roleplayId:r.id,expectedRevision:rev}))}>Завершить и получить итог</Button>}
+        </div>
+      </>}
+    </>
   );
 }

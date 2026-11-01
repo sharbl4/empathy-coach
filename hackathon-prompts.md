@@ -1,5 +1,7 @@
 # «Между строк»: полноценная v1 за 3 дня
 
+> ЗАМЕНЕНО решением Антона 31.10.2026: Telegram-only, QQCloud bot+PostgreSQL, домашняя Windows-модель через закрытую сеть. Актуальны docs/product.md, docs/architecture.md, docs/domain-contract.md, docs/acceptance.md и AGENTS.md. Ниже план v3 сохранён как история; web/Supabase/GigaChat, браузерный вход и независимость от домашнего ПК больше не runtime-требования. Учебные механики и независимые правила защиты сохранены. Исходная копия: docs/archive/hackathon-prompts-v3.md.
+
 Версия 3. Полноценная v1 за три дня, облачный хостинг от организаторов, LLM — GigaChat. Заменяет предыдущий план MVP.
 Команда: Антон — team lead / Codex; Дима — backend / Codex; Даня — frontend / Claude Code.
 

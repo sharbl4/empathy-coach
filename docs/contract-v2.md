@@ -1,0 +1,49 @@
+> Current approved A1 2.2: [runtime/persistence/support rules](contract-v2.2.md), [exact signatures](facade-v2.2.md), [handoff](handoff-v2.md). This supersedes older signatures below where changed.
+
+> A1 2.1.0: email/error/HTTP/preview/lifecycle additions and exact signatures supersede omissions below. See [resolution](contract-a1-resolution.md), [generated facade](facade-v2.1.md), [current handoff](handoff-v2.md).
+
+# Общий контракт web + Telegram v2 · A1
+
+Новая явная версия решения Антона от31.10.2026 заменяет Telegram-only. Источник: packages/contracts/src/{product,http}.ts, exports @between/contracts/product и /http. Старые DTO/v1 сохранены для миграции/архивных регрессий, не новая публичная схема. Все27 функций раздела7 входят в текущий объём, а не roadmap. Фасада названа ProductFacade/CreateProductDomain. Первый сквозной путь реализуется раньше остальных функций, но отсутствие остальных блокирует полную приёмку.
+
+## Identity и lifecycle
+
+UserContext непрозрачен, с account UUID, Telegram BIGINT/string и transport. Его выдаёт домен после проверки issuer/аккаунта/состояния: Telegram sender только из доверенного private update; web только по действительной серверной сессии. Username/email никогда не связывают произвольные аккаунты. Callback/body/URL могут указывать только ресурс, не владельца. Каждый вложенный ID/revision проверяется заново. Test-only adapters отказываются в production.
+
+createDomain(options) импортируется и конструируется без запуска HTTP/polling/workers. start() запускает только доменные workers/scheduler явно; createTelegramTransport импортируется без polling, identify() получает реальный botId, acquirePollerLease(botId) удерживает один poller, start(lease) запускает его. HTTP, polling и workers — один процесс. При ошибке частичного старта/сигнале: остановить приём HTTP/updates, abort/drain задач с лимитом, прекратить scheduler/delivery, закрыть transport/HTTP/domain/pool в finally, не бросать живой lease при exitCode1. Offline LLM не выключает чтение истории/аккаунта/карточек.
+
+## Веб-вход в тот же аккаунт
+
+Согласованный сценарий B2/C2 из team-tasks-web-telegram.md: **бот → одноразовая ссылка → landing → явный POST → session cookie**. Обратный browser challenge/approve flow из раннего чернового коммита88b83d3 заменён, не реализовывать его.
+В личном боте кнопка «Открыть веб» вызывает issueWebLink(domain ctx, stable intent). Только подтверждённый аккаунт/согласие. Domain создаёт crypto256bit одноразовый token, хранит только hash/HMAC+account+TTL5мин. IssuedWebLink — приватный ответ транспорту с webUrl на WEB_ORIGIN/auth/connect#token=..., не произвольный redirect и не публичный HTTP DTO. Bot отключает link preview и предупреждает: ссылка даёт доступ, её нельзя пересылать.
+GET/HEAD landing и Telegram preview НЕ погашают token. Клиент немедленно извлекает fragment в оперативную память и очищает URL через history.replaceState, не пишет token в localStorage/аналитику/error logs. Landing без сторонних scripts, Cache-Control:no-store, Referrer-Policy:no-referrer; кнопка «Подтвердить вход» вызывает только POST /api/auth/web-links/redeem {token,confirmed:true}. Никаких auth-token query/path параметров. Обычный вход без ссылки: /api/auth/entry даёт только public telegramUrl для получения ссылки в своём боте.
+GET /api/auth/session создаёт/проверяет opaque browser binding и возвращает только PublicWebSession + CSRF. Cookie HttpOnly, host-only, Path=/, Secure в production, SameSite=Lax; __Host-between-session и __Host-between-link, отдельные dev имена. Session crypto256bit, только hash/HMAC в DB, TTL24ч/idle2ч, rotation при входе. Три независимых EMAIL_CODE_SECRET/WEB_SESSION_SECRET/WEB_LINK_SECRET.
+redeemWebLink(browser,input,key) — атомарно с блокировкой token hash, проверкой TTL/consent/account и browser CSRF/origin, одно создание session для владельца ссылки. Другой payload/браузер/replay даёт конфликт/LINK_ALREADY_USED; конкурентно только один результат. Повтор того же намерения в том же browser binding возвращает ту же сессию/receipt без второго погашения; raw cookie можно воспроизводить защищённым HMAC derivation, не сохранять plaintext token. После неизвестного исхода сначала проверить /auth/session, не создавать новую сессию скрытно.
+Private BrowserAccess/ConsumedWebLink никогда не сериализуются; session token только Set-Cookie, public response строго PublicWebSession. Browser уже другого аккаунта → ACCOUNT_CONFLICT/явный logout, никакого merge. Logout/revoke/delete/expiry отнимают доступ немедленно, revoked session не оживает при повторе старого intent. Старые аккаунты не объединяются по email/username.
+Любой mutation: exact WEB_ORIGIN, X-CSRF-Token, проверенная cookie и UUID Idempotency-Key; missing/null Origin отвергается. Нет широкого CORS. Trust proxy только точный проверенный IP. Cookie/link/URL/body/headers не логировать. Модельный текст plain text/React escaping, не HTML.
+
+## Privacy preview и генерация
+
+SessionInputV2 различает understand/say_direct/before_send/thread. «До отправки» и «Сказать прямо» не требуют выдуманного сообщения собеседника. Thread — ordered self/other, не system/tool/assistant роли модели. Собственная гипотеза до анализа: точные цитаты либо unsure. Редактирование меняет revision и инвалидирует старые подтверждения.
+
+createPreview получает только клиентский ввод/ссылки. Сервер строит полный модельный snapshot со всеми контекстами, цитатами, историей роли/ветки, автоочищает email/телефоны и выдаёт текстовые slots с opaque fieldId, порядком и ролями. Клиент редактирует только разрешённые поля, не history/analysis/owner. Все изменения заново очищаются, получают revision/hash. confirmPreview подтверждает именно весь snapshot/hash; нет генерации до действующего confirmed preview и token budget fit. Model/prompt/template или данные изменились → PREVIEW_STALE. Нельзя молча обрезать input/output. Полный бюджет: шаблон+system+input+output+reserve ≤ context. Неизвестный budget не выдавать за fits.
+
+startRun/retry принимают только подтверждённый owned previewId/revision и expected session revision. Модель получает этот snapshot, а не повторно собранный/неподтверждённый input. Строгая output schema, exact evidence по fieldId/quote; turn3 роли только итог, ранний finish после turn1. Reasoning/refusal/partial output не становятся успешным run. Очередь ограниченная, GPU concurrency1, неопределённый исход не перезапускает генерацию. Удаление/отзыв/изменение блокируют поздний output/delivery.
+
+## Общие данные и полный объём
+
+Все операции в operations типизированы один раз; webApi связывает HTTP с ними, bot вызывает методы фасады напрямую. Path/query/body собираются сервером с запретом коллизий, strict schema не принимает ownerId. У всех mutable методов UUID intent key с namespace account+operation+resource, canonical validated payload и SQL unique/transaction; другой payload того же ключа —409. Обновления из двух интерфейсов видны по одной DB/revision, конфликт не затирает данные. Пагинация opaque cursor updatedAt DESC,id DESC, limit1..50.
+
+Сохранены durable inbox/offset/intent, outbox attempts/lease, shutdownSignal. Ack не выполняется в finally до определённого исхода; delivery failure не вызывает новую генерацию. Сессии удаляются отдельно от учебных данных и аккаунта; аккаунт удаляет web sessions, задания/notifications/привязки. Старые миграции и данные не переписывать; существующие UUID нельзя приписать Telegram по email.
+
+Напоминания только opt-in, timezone выбрана пользователем (IANA), quiet hours/отписка доступны в обоих интерфейсах; delivery только Telegram. DST gap — следующий допустимый момент, overlap — один раз на localDate. Daily completion уникально account+content version+localDate, при повторах не растут стрики. Старые localDate не пересчитываются задним числом при смене timezone. Автозадания — редакционные, не скрытые генерации модели без preview.
+
+Карточки/примеры имеют contentVersion;5–10 синтетических примеров запускают настоящий анализ, готовый ответ не подставляется. Оценки попыток0–2 отделены от счётчиков. До/после —3–5 сопоставимых заданий с рубрикой0–2, server-owned ключами; followup не раньше7 календарных дней в сохранённой baseline timezone. Endpoint отвергает score/eligibleAt из клиента. Это учебный результат, не доказательство психологического эффекта.
+
+Полезность — own run upsert, изменение оценки не дубль. Аналитика — allowlisted events/context/usefulness без текста/внешних trackers; aggregate report внутренний, не публичный доступ к данным других пользователей. Support contacts только проверенные источники/дата/выбранный пользователем регион, без обещания распознать опасность и без выдуманных телефонов.
+
+## Передача без внешних сообщений
+
+Согласование минимального checkpoint: Дима реализует Account/Browser binding/session/preview/run/history и корректный lifecycle; Даня импортирует /product и /http, строит web+bot на этих DTO. Дополнительные DTO раздела7 фиксируются сейчас; реализация всех функций обязательна до полной приёмки. Этот файл — локальный материал для сверки, не свидетельство, что Дима/Даня уже подтвердили контракт. По текущему указанию Антона внешние issues/комментарии/сообщения не отправляются.
+
+Lifecycle refinement: stopAccepting prevents new mutable work, HTTP/Telegram health expose actual listening/polling; lease.release and all close methods are idempotent even after domain.close. Session detail contains paginated runs/roleplays, dedicated list/read endpoints continue them; deleteSession requires expectedRevision. Web sessions list accepts PageQuery. Delivery is a discriminated run/reminder union; reminder payload is editorial daily practice metadata, never a forged successful run. Claim/delivery rechecks opt-in, localDate, quiet hours and account deletion/revocation.

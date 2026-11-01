@@ -1,1 +1,49 @@
-{"name":"@between/contracts","version":"0.1.0","private":true,"type":"module","exports":{".":{"types":"./dist/index.d.ts","default":"./dist/index.js"},"./fixtures":{"types":"./dist/fixtures.d.ts","default":"./dist/fixtures.js"}},"scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc -p tsconfig.json --noEmit"},"dependencies":{"zod":"4.6.7"}}
+{
+  "name": "@between/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "default": "./dist/domain.js"
+    },
+    "./fixtures": {
+      "types": "./dist/fixtures.d.ts",
+      "default": "./dist/fixtures.js"
+    },
+    "./domain-fixtures": {
+      "types": "./dist/domain-fixtures.d.ts",
+      "default": "./dist/domain-fixtures.js"
+    },
+    "./product": {
+      "types": "./dist/product.d.ts",
+      "default": "./dist/product.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./product-fixtures": {
+      "types": "./dist/product-fixtures.d.ts",
+      "default": "./dist/product-fixtures.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "browser": null,
+      "node": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  }
+}

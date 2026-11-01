@@ -51,10 +51,15 @@ export class Poller {
           this.polling=true;backoff=this.options.backoffMs;
           for(const update of updates){
             if(signal.aborted)break;
-            const handled=await this.handle(update);
-            // Bounded: no endless loop when the domain cannot store any outcome; never ack such an update.
-            if(this.unrecorded>=MAX_UNRECORDED)throw new PollerStalled();
-            if(!handled.done){await sleep(Math.min(handled.waitMs,MAX_BACKOFF),signal);break;}
+            // Keep the received batch in memory until this update has a durable outcome.
+            // A retry must not depend on Telegram returning the same payload on a later poll.
+            // Domain attempts/intent keys still bound replay; unknown admission never becomes an ack.
+            while(!signal.aborted){
+              const handled=await this.handle(update);
+              if(this.unrecorded>=MAX_UNRECORDED)throw new PollerStalled();
+              if(handled.done)break;
+              await sleep(Math.min(handled.waitMs,MAX_BACKOFF),signal);
+            }
           }
         }catch(error){
           if(signal.aborted)break;

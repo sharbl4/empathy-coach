@@ -6,7 +6,9 @@ import {Button,Loading,Notice} from '../../components/ui';
 import {api,errorText,newKey} from '../../lib/api';
 import {kindLabels} from '../../lib/labels';
 import {useAsync} from '../../lib/useAsync';
-import {saveDialogue} from '../../lib/dialogue';
+import {saveDialogue,type Dialogue} from '../../lib/dialogue';
+import {AssessmentPending} from '../../components/AssessmentPending';
+import {isApiError} from '../../lib/api';
 import {recordStage} from '../../lib/stage';
 
 type Pv=z.infer<typeof Preview>;
@@ -37,11 +39,17 @@ export function PreviewPage({id}:{id:string}) {
   const keys=useRef({edit:newKey(),confirm:newKey(),start:newKey()});
   useEffect(()=>{if(loaded.data){setPreview(loaded.data);setEdits({});}},[loaded.data]);
   const [shown,setShown]=useState(false);
+  const [pending,setPending]=useState<Dialogue|null>(null);const [bind,setBind]=useState(0);
   useEffect(()=>{
     if(!preview)return;let cancelled=false;setShown(false);
-    void api('dialogue',{}).then(d=>saveDialogue(d,{step:'preview',sessionId:preview.sessionId,previewId:preview.id,roleplayId:preview.dependencies.find(dep=>dep.kind==='roleplay')?.id??null,navigation:{kind:'preview',previewId:preview.id,previewRevision:preview.revision,snapshotHash:preview.snapshotHash}})).then(()=>{if(!cancelled)setShown(true);},e=>{if(!cancelled)setError(errorText(e));});
+    void api('dialogue',{}).then(d=>saveDialogue(d,{step:'preview',sessionId:preview.sessionId,previewId:preview.id,roleplayId:preview.dependencies.find(dep=>dep.kind==='roleplay')?.id??null,navigation:{kind:'preview',previewId:preview.id,previewRevision:preview.revision,snapshotHash:preview.snapshotHash}})).then(()=>{if(!cancelled)setShown(true);},async e=>{
+      if(cancelled)return;
+      // A saved unfinished test blocks binding this preview: offer to continue or reset it, never discard silently.
+      if(isApiError(e,'REVISION_CONFLICT')){const d=await api('dialogue',{}).catch(()=>null);if(!cancelled&&d?.navigation.kind==='assessment'){setPending(d);return;}}
+      setError(errorText(e));
+    });
     return ()=>{cancelled=true;};
-  },[preview]);
+  },[preview,bind]);
   if(loaded.loading&&!preview)return <Loading label="Готовим предпросмотр"/>;
   if(!preview)return <Notice tone="error" action={<Button variant="secondary" onClick={loaded.reload}>Повторить</Button>}>{errorText(loaded.error)}</Notice>;
   const dirty=Object.entries(edits).some(([fieldId,value])=>preview.fields.find(f=>f.id===fieldId)?.value!==value);
@@ -68,6 +76,7 @@ export function PreviewPage({id}:{id:string}) {
     <>
       <h1>Проверьте, что уйдёт в модель</h1>
       <p className="muted">{kindLabels[preview.kind]} · версия предпросмотра {preview.revision}</p>
+      {pending&&<AssessmentPending dialogue={pending} onResolved={()=>{setPending(null);setBind(n=>n+1);}}/>}
       {preview.safety==='support'&&<Support/>}
       <Notice>{preview.redactionCount?`Автоматически скрыто телефонов и почт: ${preview.redactionCount}. `:'Телефонов и почт не найдено. '}Имена и адреса проверьте сами. Это помощь, а не гарантия анонимности. Данные проходят через сервер проекта и обрабатываются моделью на компьютере команды.</Notice>
       <form className="grid-form" onSubmit={e=>{e.preventDefault();void save();}}>

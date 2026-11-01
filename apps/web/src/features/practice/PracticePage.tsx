@@ -87,7 +87,9 @@ function Assessment() {
     catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново, чтобы увидеть сохранённые.':`Ответ не сохранился: ${errorText(e)}`);}
   };
   const submit=async()=>{if(!form||!dialogue)return;setBusy(true);setError(null);
-    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:dialogue.revision,answers:ordered(form,answers)},{key}));recordStage('assessment_completed');setForm(null);}
+    try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:dialogue.revision,answers:ordered(form,answers)},{key}));recordStage('assessment_completed');setForm(null);
+      // The domain resets the shared dialogue on submit; continue from its new revision.
+      setDialogue(await api('dialogue',{}).catch(()=>null));}
     catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново.':errorText(e));}finally{setBusy(false);}};
   const reset=async()=>{if(!dialogue)return;setBusy(true);setError(null);try{setDialogue(await api('resetDialogue',{expectedRevision:dialogue.revision,confirmation:'DISCARD_UNFINISHED_ASSESSMENT'},{key:newKey()}));setAnswers({});setForm(null);setDiscard(false);}catch(e){setError(errorText(e));}finally{setBusy(false);}};
   return (

@@ -154,13 +154,20 @@ export class FakeProduct {
     if(!DialoguePatch.safeParse(input).success)fail('VALIDATION_ERROR');
     return this.once(ctx,key,input,()=>{
       const cur=this.dialogues.get(ctx.accountId)??this.blank();if(cur.revision!==input.expectedRevision)fail('REVISION_CONFLICT');
+      if(cur.navigation.kind==='assessment'&&!this.discarding&&(input.navigation.kind!=='assessment'||input.navigation.assessmentId!==cur.navigation.assessmentId))fail('REVISION_CONFLICT');
       if(input.sessionId)this.owned(ctx,input.sessionId);
       if(input.previewId){const p=this.previews.get(input.previewId);if(!p||p.owner!==ctx.accountId)fail('NOT_FOUND');}
       const {expectedRevision:_e,...rest}=input;void _e;
       const next:Dlg={...structuredClone(rest),revision:cur.revision+1,pendingRunId:cur.pendingRunId,createdAt:cur.createdAt,expiresAt:new Date(Date.now()+3600000).toISOString()};this.dialogues.set(ctx.accountId,next);return structuredClone(next);
     });
   }
-  async resetDialogue(ctx:UserContext,input:{expectedRevision:number},key:string) {return this.updateDialogue(ctx,{expectedRevision:input.expectedRevision,step:'menu',draft:{},navigation:{kind:'none'},sessionId:null,previewId:null,roleplayId:null},key);}
+  private discarding=false;
+  async resetDialogue(ctx:UserContext,input:{expectedRevision:number;confirmation?:'DISCARD_UNFINISHED_ASSESSMENT'},key:string) {
+    const cur=this.dialogues.get(ctx.accountId);
+    if(cur?.navigation.kind==='assessment'&&input.confirmation!=='DISCARD_UNFINISHED_ASSESSMENT')fail('REVISION_CONFLICT');
+    this.discarding=true;try{return await this.resetPlain(ctx,input,key);}finally{this.discarding=false;}
+  }
+  private async resetPlain(ctx:UserContext,input:{expectedRevision:number},key:string) {return this.updateDialogue(ctx,{expectedRevision:input.expectedRevision,step:'menu',draft:{},navigation:{kind:'none'},sessionId:null,previewId:null,roleplayId:null},key);}
 
   // ---- sessions
   async createSession(ctx:UserContext,input:Input,key:string) {
@@ -175,7 +182,7 @@ export class FakeProduct {
   }
   async session(ctx:UserContext,q:{id:string}) {
     this.learning('session',ctx);const s=this.owned(ctx,q.id);
-    const runs=[...this.runs.values()].filter(r=>r.owner===ctx.accountId&&r.run.sessionId===s.id).map(r=>structuredClone(r.run)).reverse();
+    const runs=[...this.runs.values()].filter(r=>r.owner===ctx.accountId&&r.run.sessionId===s.id).map(r=>({...structuredClone(r.run),myRating:(this.votes.get(`${ctx.accountId}:${r.run.id}`)??null) as 'useful'|'not_useful'|null})).reverse();
     return {...this.session_(s),runs:{items:runs,nextCursor:null},roleplays:await this.roleplays(ctx,{sessionId:s.id,limit:20})};
   }
   async updateSession(ctx:UserContext,input:{id:string;expectedRevision:number;input:Input},key:string) {
@@ -232,7 +239,7 @@ export class FakeProduct {
       this.runs.set(run.id,{owner:ctx.accountId,run});return {runId:run.id,...(resourceId?{resourceId}:{})};
     });
   }
-  async run(ctx:UserContext,q:{id:string}) {this.learning('run',ctx);const r=this.runs.get(q.id);if(!r||r.owner!==ctx.accountId||(r.run.sessionId&&!this.store.has(r.run.sessionId)))fail('NOT_FOUND');return structuredClone(r!.run);}
+  async run(ctx:UserContext,q:{id:string}) {this.learning('run',ctx);const r=this.runs.get(q.id);if(!r||r.owner!==ctx.accountId||(r.run.sessionId&&!this.store.has(r.run.sessionId)))fail('NOT_FOUND');return {...structuredClone(r!.run),myRating:(this.votes.get(`${ctx.accountId}:${q.id}`)??null) as 'useful'|'not_useful'|null};}
   async retry(ctx:UserContext,input:{id:string;previewId:string;previewRevision:number;snapshotHash:string},key:string) {
     this.learning('retry',ctx);const r=this.runs.get(input.id);if(!r||r.owner!==ctx.accountId)fail('NOT_FOUND');
     if(this.previews.get(input.previewId)?.preview.snapshotHash!==input.snapshotHash)fail('PREVIEW_STALE');
@@ -272,7 +279,9 @@ export class FakeProduct {
   async submitAssessment(ctx:UserContext,input:{id:string;expectedDialogueRevision:number;answers:{questionId:string;choiceId:string}[]},key:string) {
     this.learning('submitAssessment',ctx);
     if(this.dialogues.get(ctx.accountId)?.revision!==input.expectedDialogueRevision)fail('REVISION_CONFLICT');
-    return this.once(ctx,key,input,()=>{this.assessmentSubmitted=now();return {id:input.id,kind:'baseline' as const,scores:input.answers.map(a=>({questionId:a.questionId,score:a.choiceId==='a'?2:0,rationale:a.choiceId==='a'?'Ясный уважительный вопрос':'Обвинение без уточнения'})),completedAt:now(),followupEligibleAt:new Date(Date.now()+7*86400000).toISOString(),notice:'Учебный результат, не оценка эмпатии и не доказательство психологического эффекта' as const};});
+    return this.once(ctx,key,input,()=>{this.assessmentSubmitted=now();
+      // Like the real domain: submit atomically resets the dialogue to a blank state with a new revision.
+      const cur=this.dialogues.get(ctx.accountId)!;this.dialogues.set(ctx.accountId,{...this.blank(),step:'menu',revision:cur.revision+1});return {id:input.id,kind:'baseline' as const,scores:input.answers.map(a=>({questionId:a.questionId,score:a.choiceId==='a'?2:0,rationale:a.choiceId==='a'?'Ясный уважительный вопрос':'Обвинение без уточнения'})),completedAt:now(),followupEligibleAt:new Date(Date.now()+7*86400000).toISOString(),notice:'Учебный результат, не оценка эмпатии и не доказательство психологического эффекта' as const};});
   }
   async assessmentResults(ctx:UserContext) {this.learning('assessmentResults',ctx);return {items:[],nextCursor:null};}
   async reminders(ctx:UserContext) {this.learning('reminders',ctx);return structuredClone(this.reminderState);}

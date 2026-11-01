@@ -89,7 +89,7 @@ export class Flows {
     if(escalates(error))throw error;
     const retry=normalizeDomainError(error,'bot').retryAfterSeconds;
     switch(failureCode(error)){
-      case 'REVISION_CONFLICT':{t.dlg=await this.domain.dialogue(t.ctx,{});return this.say(t,T.texts.conflict,menuRows());}
+      case 'REVISION_CONFLICT':{t.dlg=await this.domain.dialogue(t.ctx,{});if(t.dlg.navigation.kind==='assessment')return this.assessmentPending(t);return this.say(t,T.texts.conflict,menuRows());}
       case 'IDEMPOTENCY_CONFLICT':{t.dlg=await this.domain.dialogue(t.ctx,{});return this.say(t,T.texts.stale,menuRows());}
       case 'NOT_FOUND':return this.say(t,T.texts.notFound,[[toMenu]]);
       case 'RATE_LIMITED':return this.say(t,retry?`${T.texts.rateLimited} Можно через ${retry} с.`:T.texts.rateLimited,[[toMenu]]);
@@ -428,6 +428,10 @@ export class Flows {
   }
 
   // ---------- menu
+  /** A saved unfinished test is never discarded silently by another scenario: continue it or reset it explicitly. */
+  private assessmentPending(t:Turn) {
+    return this.say(t,'У тебя есть незавершённый тест до/после — ответы сохранены. Сначала продолжи его или сбрось (сброс нужно подтвердить).',[[b('Продолжить тест','ast'),b('Сбросить тест','asr')]]);
+  }
   private async moveTurn(t:Turn,id:string,delta:number){
     const turns=[...(t.dlg.draft.turns??[])],at=turns.findIndex(v=>v.id===id),to=at+delta;
     if(t.dlg.step!=='compose'||t.dlg.draft.mode!=='thread'||at<0||to<0||to>=turns.length)return this.say(t,T.texts.stale);
@@ -664,6 +668,7 @@ export class Flows {
     return this.say(t,'Выбери вымышленную ситуацию. Разбор сгенерирует настоящая локальная модель — заготовленных ответов нет. Одна и та же фраза может встречаться в разных сферах.',[...page.items.map(e=>[f(`${T.contextLabels[e.input.contextType]} · ${T.shortTitle(e.input.title,30)}`,'exs',e.id)]),...filterRows,[toMenu]]);
   }
   private async pickExample(t:Turn,id:string) {
+    if(t.dlg.navigation.kind==='assessment')return this.assessmentPending(t);
     const e=await this.domain.example(t.ctx,{id}),i=e.input;
     const base:Draft={mode:i.mode,title:i.title,relationship:i.relationship,context:i.context,contextType:i.contextType,goal:i.goal};
     const shown=i.mode==='understand'?i.message:i.mode==='thread'?i.turns.map(x=>`${x.speaker==='self'?'Я':'Собеседник'}: ${x.text}`).join('\n'):i.draft;
@@ -711,7 +716,7 @@ export class Flows {
     const form=await this.domain.assessment(t.ctx,{kind:nav.assessmentKind});
     if(form.id!==nav.assessmentId||form.contentVersion!==nav.contentVersion||form.submittedAt)return this.startAssessment(t,nav.assessmentKind);
     if(t.dlg.step!=='assessment')await this.go(t,'assessment',{},{},nav);
-    if(nav.answers.length===form.tasks.length){const result=await this.domain.submitAssessment(t.ctx,{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:t.dlg.revision,answers:nav.answers},this.key(t,'assessment'));return this.menu(t,T.assessmentResult(result));}
+    if(nav.answers.length===form.tasks.length){const result=await this.domain.submitAssessment(t.ctx,{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:t.dlg.revision,answers:nav.answers},this.key(t,'assessment'));t.dlg=await this.domain.dialogue(t.ctx,{});return this.menu(t,T.assessmentResult(result));}
     await this.say(t,`Тест продолжается: сохранено ответов ${nav.answers.length} из ${form.tasks.length}. Выбери вариант кнопкой.`);
     return this.askTask(t,form,nav.answers.length);
   }
@@ -729,6 +734,8 @@ export class Flows {
     await this.go(t,'assessment',{},{},{...nav,answers});
     if(answers.length<form.tasks.length)return this.askTask(t,form,taskIndex+1);
     const result=await this.domain.submitAssessment(t.ctx,{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:t.dlg.revision,answers},this.key(t,'assessment'));
+    // The domain resets the dialogue atomically on submit: continue from its new revision, not the stale one.
+    t.dlg=await this.domain.dialogue(t.ctx,{});
     await this.stage(t,'assessment_completed');
     await this.go(t,'menu',{},{sessionId:null,previewId:null,roleplayId:null});
     return this.say(t,T.assessmentResult(result),[[f('Напоминания','m','rem'),toMenu]]);
@@ -776,7 +783,8 @@ export class Flows {
 
   // ---------- rendering of finished runs (from delivery or history)
   private resultRows(run:Run):Rows {
-    const rate=[f('Полезно','up',run.id),f('Не полезно','un',run.id)],sid=run.sessionId;
+    // Own vote comes from the run (myRating), so the chosen option stays visible after reload/restart.
+    const rate=[f(`${run.myRating==='useful'?'✓ ':''}Полезно`,'up',run.id),f(`${run.myRating==='not_useful'?'✓ ':''}Не полезно`,'un',run.id)],sid=run.sessionId;
     switch(run.kind){
       case 'analysis':return sid?[[f('Как уточнить?','cl',run.id)],rate,[f('Написать ответ','rw',sid),f('Упражнение','xs',sid)],[f('Потренировать разговор','rp',sid)],[toMenu]]:[rate,[toMenu]];
       case 'reply_feedback':case 'before_send':{
@@ -802,7 +810,7 @@ export class Flows {
       }
       case 'reply_feedback':case 'before_send':await toMenuStep();return this.say(t,T.draftFeedback(run.output),this.resultRows(run));
       case 'reply_examples':await toMenuStep();return this.say(t,`Примеры под разные цели:\n\n${T.options(run.output)}`,this.resultRows(run));
-      case 'say_direct':await toMenuStep();return this.say(t,T.direct(run.output),[[f('Полезно','up',run.id),f('Не полезно','un',run.id)],[f('Новая фраза','m','d'),toMenu]]);
+      case 'say_direct':await toMenuStep();return this.say(t,T.direct(run.output),[this.resultRows(run)[0]!,[f('Новая фраза','m','d'),toMenu]]);
       case 'clarify':await toMenuStep();return this.say(t,T.clarifyRun(run.output),this.resultRows(run));
       case 'exercise':
         if(waiting){await this.go(t,'exercise',{},{sessionId:run.sessionId,previewId:null,roleplayId:null});return this.say(t,T.exercise(run.output),[[toMenu]]);}

@@ -13,4 +13,6 @@ if(!api.length||!http.length||!bot.length||process.env.NODE_ENV!=='test'||!safeD
 const result=spawnSync(process.execPath,['--import','tsx','--test','--test-reporter=tap',...api,...http,...bot],{encoding:'utf8'});
 const output=result.stdout??'',tests=Number(/^# tests (\d+)$/m.exec(output)?.[1]??0),failed=Number(/^# fail (\d+)$/m.exec(output)?.[1]??1),skipped=Number(/^# skipped (\d+)$/m.exec(output)?.[1]??1);
 console.log(`Domain/bot checks: tests=${tests}, failed=${failed}, skipped=${skipped}; raw output suppressed.`);
+// Test titles are static source labels. Never print TAP error bodies, SQL, URLs or adapter payloads.
+if(failed)for(const line of output.split('\n'))if(/^not ok \d+ - /.test(line))console.error('Failed check: '+line.replace(/^not ok \d+ - /,''));
 process.exit(result.status===0&&tests>0&&failed===0&&skipped===0?0:1);

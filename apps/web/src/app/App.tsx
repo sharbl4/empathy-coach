@@ -1,71 +1,49 @@
-import { useEffect, type ReactNode } from 'react';
-import { matchPath, navigate, safeNext, useLocation } from './router';
-import { useAuth } from './context';
-import { AuthCallbackPage, CheckEmailPage, ForgotPasswordPage, LoginPage, RecoveryPage, SignupPage } from '../features/auth/pages';
-import { ProfileProvider } from '../features/account/profile';
-import { Shell } from '../features/account/Shell';
-import { Placeholder } from '../features/account/placeholders';
-import { HistoryPage } from '../features/sessions/HistoryPage';
-import { NewSessionPage } from '../features/sessions/NewSessionPage';
-import { SessionPage } from '../features/sessions/SessionPage';
+import {useEffect,type ReactNode} from 'react';
+import {matchPath,navigate,useLocation} from './router';
+import {Loading,Notice,Button} from '../components/ui';
+import {useSession} from '../lib/session';
+import {ConnectPage,LoginPage} from '../features/auth/AuthPages';
+import {Shell} from '../features/Shell';
+import {HistoryPage} from '../features/history/HistoryPage';
+import {ComposePage,ExamplesPage} from '../features/compose/ComposePage';
+import {PreviewPage} from '../features/preview/PreviewPage';
+import {RunPage} from '../features/runs/RunPage';
+import {RoleplayPage,SessionPage} from '../features/sessions/SessionPage';
+import {PracticePage} from '../features/practice/PracticePage';
+import {ProgressPage} from '../features/progress/ProgressPage';
+import {SettingsPage} from '../features/settings/SettingsPage';
 
-function Redirect({ to }: { to: string }) {
-  useEffect(() => { navigate(to, { replace: true, force: true }); }, [to]);
-  return null;
-}
+function Redirect({to}:{to:string}) {useEffect(()=>{navigate(to,{replace:true,force:true});},[to]);return null;}
 
-const publicAuth: Record<string, () => ReactNode> = {
-  '/auth/login': () => <LoginPage />,
-  '/auth/signup': () => <SignupPage />,
-  '/auth/check-email': () => <CheckEmailPage />,
-  '/auth/forgot': () => <ForgotPasswordPage />,
-};
-
-interface CabinetRoute { pattern: string; render(params: Record<string, string>): ReactNode; }
-const cabinet: CabinetRoute[] = [
-  { pattern: '/new', render: () => <NewSessionPage /> },
-  { pattern: '/history', render: () => <HistoryPage /> },
-  // key: a different session id remounts the page, so no state or polling leaks between sessions.
-  { pattern: '/sessions/:id', render: params => <SessionPage key={params.id} id={params.id} /> },
-  { pattern: '/practice', render: () => <Placeholder title="Практика" text="Прогресс и практика — задача дня 2." /> },
-  { pattern: '/settings', render: () => <Placeholder title="Настройки" text="Имя и удаление данных — задача дня 2." /> },
+const routes:{pattern:string;render(p:Record<string,string>):ReactNode}[]=[
+  {pattern:'/history',render:()=><HistoryPage/>},
+  {pattern:'/new',render:()=><ComposePage/>},
+  {pattern:'/examples',render:()=><ExamplesPage/>},
+  // key remounts per id so no state or polling leaks between records.
+  {pattern:'/previews/:id',render:p=><PreviewPage key={p.id} id={p.id!}/>},
+  {pattern:'/runs/:id',render:p=><RunPage key={p.id} id={p.id!}/>},
+  {pattern:'/sessions/:id',render:p=><SessionPage key={p.id} id={p.id!}/>},
+  {pattern:'/roleplays/:id',render:p=><RoleplayPage key={p.id} id={p.id!}/>},
+  {pattern:'/practice',render:()=><PracticePage/>},
+  {pattern:'/progress',render:()=><ProgressPage/>},
+  {pattern:'/settings',render:()=><SettingsPage/>},
 ];
 
-function NotFound() {
-  return (
-    <main className="page page-narrow" id="main">
-      <h1>Страница не найдена</h1>
-      <p><a href="/">На главную</a></p>
-    </main>
-  );
-}
-
 export function App() {
-  const { pathname, search } = useLocation();
-  const { user, recovery } = useAuth();
-
-  // Auth-link targets work with or without a session: the guard must not swallow recovery.
-  if (pathname === '/auth/recovery') return <RecoveryPage />;
-  if (pathname === '/auth/callback') return <AuthCallbackPage />;
-  if (user && recovery) return <Redirect to="/auth/recovery" />;
-
-  const authPage = publicAuth[pathname];
-  if (authPage) {
-    if (user) return <Redirect to={safeNext(new URLSearchParams(search).get('next')) ?? '/history'} />;
-    return <>{authPage()}</>;
+  const {pathname}=useLocation();
+  const {session,error,refresh}=useSession();
+  if(pathname==='/auth/connect')return <ConnectPage/>;
+  if(!session){
+    if(error)return <main className="page-narrow" id="main"><Notice tone="error" action={<Button variant="secondary" onClick={()=>void refresh()}>Повторить</Button>}>Сервер недоступен. Проверьте связь и повторите.</Notice></main>;
+    return <main className="page-narrow" id="main"><Loading label="Проверяем вход"/></main>;
   }
-
-  if (pathname === '/') return <Redirect to={user ? '/history' : '/auth/login'} />;
-
-  for (const route of cabinet) {
-    const params = matchPath(route.pattern, pathname);
-    if (!params) continue;
-    if (!user) return <Redirect to={`/auth/login?next=${encodeURIComponent(pathname)}`} />;
-    return (
-      <ProfileProvider key={user.id}>
-        <Shell>{route.render(params)}</Shell>
-      </ProfileProvider>
-    );
+  if(pathname==='/auth/login')return session.authenticated?<Redirect to="/history"/>:<LoginPage/>;
+  if(pathname==='/')return <Redirect to={session.authenticated?'/history':'/auth/login'}/>;
+  for(const route of routes){
+    const params=matchPath(route.pattern,pathname);
+    if(!params)continue;
+    if(!session.authenticated)return <Redirect to="/auth/login"/>;
+    return <Shell key={session.account.id}>{route.render(params)}</Shell>;
   }
-  return <NotFound />;
+  return <main className="page-narrow" id="main"><h1>Страница не найдена</h1><p><a href="/">На главную</a></p></main>;
 }

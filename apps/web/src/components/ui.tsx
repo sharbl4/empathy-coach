@@ -46,7 +46,7 @@ export function TextArea({ label, hint, error, counter, ...rest }: FieldShell & 
 }
 
 /** Errors use role=alert. role=status is reserved for the single server-status line. */
-export function Notice({ tone = 'info', title, children, action }: { tone?: 'info' | 'error' | 'success' | 'dev'; title?: string; children?: ReactNode; action?: ReactNode }) {
+export function Notice({ tone = 'info', title, children, action }: { tone?: 'info' | 'error' | 'success'; title?: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className={`notice notice-${tone}`} role={tone === 'error' ? 'alert' : undefined} aria-live={tone === 'error' ? undefined : 'polite'}>
       {title && <p className="notice-title">{title}</p>}
@@ -58,8 +58,4 @@ export function Notice({ tone = 'info', title, children, action }: { tone?: 'inf
 
 export function Loading({ label }: { label: string }) {
   return <p className="loading" aria-live="polite"><span className="spinner" aria-hidden="true" />{label}</p>;
-}
-
-export function DevBadge({ children }: { children: ReactNode }) {
-  return <p className="dev-banner"><strong>DEV · фикстуры</strong> {children}</p>;
 }

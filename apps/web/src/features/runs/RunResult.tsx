@@ -11,6 +11,11 @@ type Done=Extract<Run,{status:'succeeded'}>;
 
 const List=({items}:{items:string[]})=>items.length?<ul>{items.map((x,i)=><li key={i}>{x}</li>)}</ul>:<p className="muted">—</p>;
 
+function CopyReply({text}:{text:string}) {
+  const [status,setStatus]=useState('');
+  return <><Button variant="secondary" onClick={()=>{if(!navigator.clipboard){setStatus('Выделите текст и скопируйте вручную.');return;}void navigator.clipboard.writeText(text).then(()=>setStatus('Скопировано'),()=>setStatus('Не удалось скопировать — выделите текст вручную.'));}}>Копировать ответ</Button><span role="status">{status}</span></>;
+}
+
 function Goals({items}:{items:{goal:keyof typeof goalLabels;text:string;explanation:string}[]}) {
   return <dl className="goals">{items.map(o=><div key={o.goal}><dt><strong>{goalLabels[o.goal]}</strong></dt><dd><p className="message">{o.text}</p><p className="small muted">{o.explanation}</p></dd></div>)}</dl>;
 }
@@ -56,7 +61,12 @@ export function RunResult({run,preview}:{run:Done;preview?:Pv|null}) {
           <h3>Сильные стороны</h3><List items={f.strengths}/>
           <h3>Фразы</h3>
           <ol>{f.phrases.map((p,n)=><li key={n}><p>{toneMarks[p.tone]} <strong>{toneLabels[p.tone]}</strong>: «{p.quote}»</p><p className="small">Как может прозвучать: {p.why}</p><p className="small">Возможная замена: «{p.softer}»</p></li>)}</ol>
-          <h3>Вариант доработки</h3><p className="message">{f.revisedReply}</p>
+          <section aria-label="До и после">
+            <h3>До и после</h3><p className="small muted">Сравните смысл, отказ и границы. Редакция — предложение, её не нужно принимать целиком.</p>
+            <div className="reply-comparison"><div><h4>До — подтверждённый черновик</h4>{preview?.fields.find(x=>(x.label==='draft'||x.label==='session.draft'))?<p className="message">{preview.fields.find(x=>(x.label==='draft'||x.label==='session.draft'))!.value}</p>:<p>Откройте результат с предпросмотром, чтобы увидеть исходный черновик.</p>}</div><div><h4>После — вариант доработки</h4><p className="message">{f.revisedReply}</p></div></div>
+            {f.phrases.length>0&&<><h4>Что изменено</h4><ul>{f.phrases.slice(0,3).map((p,n)=><li key={n}>«{p.quote}» → «{p.softer}»: {p.why}</li>)}</ul></>}
+            <CopyReply text={f.revisedReply}/>
+          </section>
           <h3>Примеры под разные цели</h3><Goals items={f.options}/>
         </section>
       );

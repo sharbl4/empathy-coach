@@ -226,7 +226,9 @@ test('limits keep the draft; special characters as plain text; non-text; /cancel
   assert.match(h.lastText(),/только текст/);
   assert.ok(h.sent.every(s=>!('parse_mode' in s.body)));
   await h.message('/cancel');assert.match(h.lastText(),/черновик удалён/);
-  assert.equal(h.domain.dialogues.get(h.account().id)!.step,'menu');
+  assert.equal(h.domain.dialogues.get(h.account().id)!.step,'compose');
+  assert.equal(h.domain.dialogues.get(h.account().id)!.draft.message,special);
+  assert.ok(h.last().buttons.some(b=>b.text==='Продолжить практику'));
 });
 
 test('restart: a new transport instance continues the saved step from the database',async()=>{

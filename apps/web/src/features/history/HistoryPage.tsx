@@ -1,3 +1,4 @@
+import {ContinuePractice} from '../../components/ContinuePractice';
 import {useState} from 'react';
 import type {z} from 'zod';
 import type {ContextType,LearningMode,SessionV2} from '@between/contracts/product';
@@ -26,7 +27,7 @@ export function HistoryPage() {
   return (
     <>
       <div className="page-head"><h1>История</h1><Link className="btn btn-primary" to="/new">Новый разбор</Link></div>
-      <p className="small muted">Общая для сайта и Telegram-бота.</p>
+      <p className="small muted">Общая для сайта и Telegram-бота.</p><ContinuePractice/><p><Link to="/examples">Попробовать на примере →</Link></p>
       <form className="row" role="search" onSubmit={e=>{e.preventDefault();setQuery(q.trim());}}>
         <div className="field search"><label htmlFor="history-q">Поиск по названию</label><input id="history-q" type="search" value={q} maxLength={200} onChange={e=>setQ(e.target.value)}/></div>
         <div className="field"><label htmlFor="history-context">Сфера</label><select id="history-context" value={contextType} onChange={e=>setContext(e.target.value as Ctx|'')}><option value="">Все</option>{Object.entries(contextLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div>

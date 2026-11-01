@@ -1,3 +1,4 @@
+import {useSavedAttempt} from '../../lib/useSavedAttempt';
 import {useState} from 'react';
 import type {z} from 'zod';
 import type {Difficulty,PreviewSource} from '@between/contracts/product';
@@ -90,12 +91,13 @@ export function SessionPage({id}:{id:string}) {
 
 export function RoleplayPage({id}:{id:string}) {
   const role=useAsync(signal=>api('roleplay',{id},{signal}),[id]);
-  const [text,setText]=useState('');const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
+  const saved=useSavedAttempt({step:'roleplay',roleplayId:id,sessionId:role.data?.sessionId});
+  const text=saved.text,setText=saved.change;const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
   if(!role.data)return role.loading?<Loading label="Загружаем тренировку"/>:<Notice tone="error">{errorText(role.error)}</Notice>;
   const r=role.data;
   const go=async(name:string,build:(revision:number)=>Source)=>{
     setBusy(name);setError(null);
-    try{const s=await api('session',{id:r.sessionId});const p=await api('createPreview',build(s.revision),{key:newKey()});navigate(`/previews/${p.id}`);}
+    try{const p=await api('createPreview',build(r.revision),{key:newKey()});navigate(`/previews/${p.id}`);}
     catch(e){setError(errorText(e));setBusy(null);}
   };
   return (
@@ -107,7 +109,7 @@ export function RoleplayPage({id}:{id:string}) {
       {r.status==='completed'&&r.feedback&&<section className="card"><h2>Итог</h2><RunResult run={{kind:'roleplay_feedback',status:'succeeded',output:r.feedback} as never}/></section>}
       {r.status==='active'&&<>
         {error&&<Notice tone="error">{error}</Notice>}
-        <TextArea label={`Ваш ответ ${r.turnCount+1} из 3`} value={text} maxLength={3000} onChange={e=>setText(e.target.value)} disabled={r.turnCount>=3}/>
+        <TextArea label={`Ваш ответ ${r.turnCount+1} из 3`} value={text} maxLength={3000} onChange={e=>setText(e.target.value)} disabled={r.turnCount>=3}/><p className="small" role="status">{saved.status}</p>
         <div className="actions">
           <Button busy={busy==='turn'} disabled={!text.trim()||r.turnCount>=3} onClick={()=>void go('turn',rev=>({kind:'roleplay_turn',roleplayId:r.id,expectedRevision:rev,content:text.trim()}))}>Ответить</Button>
           {r.turnCount>0&&<Button variant="secondary" busy={busy==='finish'} onClick={()=>void go('finish',rev=>({kind:'roleplay_feedback',roleplayId:r.id,expectedRevision:rev}))}>Завершить и получить итог</Button>}

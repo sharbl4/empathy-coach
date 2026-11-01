@@ -167,3 +167,76 @@ test('support region is an explicit stored choice that can be cleared',async({pa
   await page.getByRole('button',{name:'Сбросить',exact:true}).click();
   await page.reload();await expect(page.getByLabel('Страна')).toHaveValue('');
 });
+
+
+test('final: continue notice reopens the canonical composer; cancel reset preserves it',async({page})=>{
+  await login(page,'A');await page.goto('/new');
+  await page.getByLabel('Сообщение, которое хотите понять').fill('Синтетический черновик для продолжения');
+  await page.getByLabel('Кто этот человек').fill('Коллега');await page.waitForTimeout(1500);
+  await page.getByRole('link',{name:'История',exact:true}).click();
+  await page.getByRole('link',{name:'Продолжить практику',exact:true}).click();
+  await expect(page.getByLabel('Сообщение, которое хотите понять')).toHaveValue('Синтетический черновик для продолжения');
+  await page.getByRole('link',{name:'История',exact:true}).click();await page.getByRole('button',{name:'Сбросить практику',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'Продолжить',exact:true}).click();
+  await expect(page.getByRole('link',{name:'Продолжить практику',exact:true})).toBeVisible();
+});
+
+test('final: before/after uses confirmed preview, boundary remains and viewing does not start another run',async({page})=>{
+  await login(page,'A');await page.goto('/new');
+  await page.getByRole('button',{name:'До отправки',exact:true}).click();
+  await page.getByLabel('Ваш черновик (сообщение собеседника не нужно)').fill('Я не могу сегодня.');
+  await page.getByLabel('Кто этот человек').fill('Коллега');
+  await page.getByRole('button',{name:'Показать, что уйдёт в модель',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Проверьте, что уйдёт в модель'})).toBeVisible();
+  await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  const comparison=page.getByRole('region',{name:'До и после'});
+  await expect(comparison).toContainText('Я не могу сегодня.');await expect(comparison).toContainText('Вернёмся завтра?');
+  await page.context().grantPermissions(['clipboard-read','clipboard-write']);
+  await comparison.getByRole('button',{name:'Копировать ответ'}).click();
+  await expect(comparison.getByRole('status')).toHaveText('Скопировано');
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('Я не могу сегодня. Вернёмся завтра?');
+  const mutations:string[]=[];page.on('request',r=>{if(r.method()==='POST'&&/\/(runs|retry|previews)/.test(r.url()))mutations.push(r.url());});
+  await page.reload();await expect(page.getByRole('region',{name:'До и после'})).toContainText('Я не могу сегодня.');
+  expect(mutations).toHaveLength(0);
+});
+
+test('final: card attempt is saved in domain and resumed from history after reload',async({page})=>{
+  await login(page,'A');await page.goto('/practice');
+  const cards=page.getByRole('region',{name:'Карточки',exact:true});
+  await cards.locator('button.history-title').first().click();
+  await cards.getByLabel('Ваша попытка').fill('Мне нужно закончить сегодня. Вернёмся завтра?');
+  await expect(cards.getByRole('status')).toHaveText('Попытка сохранена.');
+  await page.getByRole('link',{name:'История',exact:true}).click();await page.reload();
+  await page.getByRole('link',{name:'Продолжить практику',exact:true}).click();
+  await expect(page.getByLabel('Ваша попытка')).toHaveValue('Мне нужно закончить сегодня. Вернёмся завтра?');
+});
+
+
+test('final: own hypothesis to analysis, clarification, draft feedback, exercise and full three-turn role on real backend',async({page})=>{
+  test.setTimeout(90000);
+  await login(page,'B');await page.goto('/new');
+  await page.getByLabel('Сообщение, которое хотите понять').fill('Давай поговорим завтра.');await page.getByLabel('Кто этот человек').fill('Коллега');
+  await page.getByLabel('Что, по-вашему, чувствует собеседник (до 3, через запятую)').fill('усталость');
+  await page.getByLabel('Точная цитата-сигнал из текста').fill('завтра');await page.getByRole('button',{name:'Добавить',exact:true}).click();
+  await page.getByRole('button',{name:'Показать, что уйдёт в модель',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Как уточнить',exact:true})).toBeVisible();
+  await page.getByRole('link',{name:'← К ситуации'}).click();const sessionUrl=page.url();
+  await page.getByLabel('Ваш черновик ответа').fill('Я не могу сегодня.');await page.getByRole('button',{name:'Разобрать черновик',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await expect(page.getByRole('region',{name:'До и после'})).toContainText('Я не могу сегодня.');
+  await page.goto(sessionUrl);await page.getByRole('button',{name:'Получить упражнение',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await expect(page.getByText('Уточни удобное время.',{exact:true})).toBeVisible();await page.goto(sessionUrl);
+  await page.getByLabel('Ваша попытка').fill('Во сколько завтра удобно?');await page.getByRole('button',{name:'Получить отзыв',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Что получилось',exact:true})).toBeVisible();await page.goto(sessionUrl);
+  await page.getByLabel('Собеседник',{exact:true}).selectOption('hurt');await page.getByRole('button',{name:'Начать тренировку',exact:true}).click();await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();await expect(page.getByText('Завтра удобно. Во сколько?',{exact:true})).toBeVisible();
+  for(let turn=1;turn<=3;turn++){
+    await page.goto(sessionUrl);await page.getByRole('link',{name:/ответов .*продолжить/}).click();
+    await expect(page.getByRole('heading',{name:'Тренировка разговора',exact:true})).toBeVisible();
+    const roleResponse=await page.request.get(new URL(page.url()).pathname.replace('/roleplays/','/api/roleplays/'));expect(roleResponse.status()).toBe(200);
+    const metadata=await roleResponse.json();console.log('SAFE_ROLE_STEP '+turn+' '+metadata.turnCount+' '+metadata.revision);expect(metadata.turnCount).toBe(turn-1);
+    await page.getByLabel(`Ваш ответ ${turn} из 3`).fill('Когда тебе удобно завтра?');await page.getByRole('button',{name:'Ответить',exact:true}).click();
+    await page.getByRole('button',{name:'Отправить в модель',exact:true}).click();
+    await expect(page).toHaveURL(/\/runs\//);
+    if(turn<3)await expect(page.getByText('Завтра удобно. Во сколько?',{exact:true})).toBeVisible();else await expect(page.getByRole('heading',{name:'Удачные действия',exact:true})).toBeVisible();
+  }
+  await page.goto(sessionUrl);await expect(page.getByRole('link',{name:/завершена/})).toBeVisible();
+});

@@ -192,13 +192,15 @@ export class FakeProduct {
   async deleteSession(ctx:UserContext,input:{id:string;expectedRevision:number},key:string) {this.learning('deleteSession',ctx);return this.once(ctx,key,input,()=>{const s=this.owned(ctx,input.id);if(s.revision!==input.expectedRevision)fail('REVISION_CONFLICT');this.store.delete(input.id);return null;});}
   async roleplays(ctx:UserContext,q:{sessionId:string;limit:number}) {this.learning('roleplays',ctx);this.owned(ctx,q.sessionId);return {items:[...this.roles.values()].filter(r=>r.owner===ctx.accountId&&r.role.sessionId===q.sessionId).map(r=>structuredClone(r.role)).reverse(),nextCursor:null};}
 
+  async roleplay(ctx:UserContext,q:{id:string}) {this.learning('roleplay',ctx);const row=this.roles.get(q.id);if(!row||row.owner!==ctx.accountId)fail('NOT_FOUND');this.owned(ctx,row!.role.sessionId);return structuredClone(row!.role);}
+
   // ---- preview → confirm → run
   async createPreview(ctx:UserContext,source:z.infer<typeof PreviewSource>,key:string) {
     this.learning('createPreview',ctx);
     return this.once(ctx,key,source,()=>{
       let sessionId:string|null=null,sessionRevision:number|null=null,raw:[string,string][]=[];
       if('sessionId' in source){const s=this.owned(ctx,source.sessionId);if(s.revision!==source.expectedRevision)fail('REVISION_CONFLICT');sessionId=s.id;sessionRevision=s.revision;raw=sessionFields(s.input) as [string,string][];}
-      if('roleplayId' in source){const r=this.roles.get(source.roleplayId);if(!r||r.owner!==ctx.accountId)fail('NOT_FOUND');sessionId=r!.role.sessionId;sessionRevision=this.owned(ctx,sessionId).revision;}
+      if('roleplayId' in source){const r=this.roles.get(source.roleplayId);if(!r||r.owner!==ctx.accountId)fail('NOT_FOUND');if(r!.role.revision!==source.expectedRevision)fail('REVISION_CONFLICT');sessionId=r!.role.sessionId;sessionRevision=this.owned(ctx,sessionId).revision;}
       if(source.kind==='reply_feedback')raw.push(['Мой черновик',source.draft]);
       if(source.kind==='exercise_feedback')raw.push(['Моя попытка',source.answer]);
       if(source.kind==='roleplay_turn')raw.push(['Мой ответ',source.content]);
@@ -234,7 +236,7 @@ export class FakeProduct {
       if([...this.runs.values()].some(r=>r.owner===ctx.accountId&&r.run.status==='pending'))fail('OPERATION_IN_PROGRESS');
       let resourceId:string|undefined;const src=p!.source;
       if(src.kind==='roleplay_start'){resourceId=randomUUID();this.roles.set(resourceId,{owner:ctx.accountId,role:{id:resourceId,sessionId:pv.sessionId!,revision:pv.sessionRevision!,difficulty:src.difficulty,status:'active',turnCount:0,messages:[],feedback:null}});}
-      if(src.kind==='roleplay_turn'){const r=this.roles.get(src.roleplayId)!.role;r.messages.push({id:randomUUID(),sequence:r.messages.length,role:'user',content:pv.fields.at(-1)!.value});r.turnCount++;}
+      if(src.kind==='roleplay_turn'){const r=this.roles.get(src.roleplayId)!.role;r.messages.push({id:randomUUID(),sequence:r.messages.length,role:'user',content:pv.fields.at(-1)!.value});r.turnCount++;r.revision++;}
       const run={id:randomUUID(),sessionId:pv.sessionId,revision:pv.sessionRevision??1,previewId:pv.id,previewRevision:pv.revision,modelRevision:'synthetic',promptVersion:'between-product-v2',kind:pv.kind,status:'pending',phase:'queued',queuePosition:1,output:null,errorCode:null,createdAt:now(),updatedAt:now()} as Run;
       this.runs.set(run.id,{owner:ctx.accountId,run});return {runId:run.id,...(resourceId?{resourceId}:{})};
     });

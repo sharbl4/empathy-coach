@@ -22,7 +22,7 @@ export function Shell({children}:{children:ReactNode}) {
       <a className="skip-link" href="#main">К содержимому</a>
       <header className="shell-header">
         <div className="shell-top">
-          <Link to="/history" className="brand">Между строк</Link>
+          <Link to="/history" className="brand">Empather</Link>
           <div className="shell-user">
             {session?.authenticated&&<span className="user-name">{session.account.displayName}</span>}
             <Button variant="ghost" onClick={()=>void logout()}>Выйти</Button>

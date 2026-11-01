@@ -79,6 +79,9 @@ export class Flows {
   }
   private async reset(t:Turn) {t.dlg=await this.domain.resetDialogue(t.ctx,{expectedRevision:t.dlg.revision},this.key(t,'reset'));return t.dlg;}
   async menu(t:Turn,prefix?:string,page=0) {
+    if(['compose','guess','preview','exercise','roleplay','card','waiting_run'].includes(t.dlg.step)){
+      return this.say(t,`${prefix?prefix+'\n\n':''}${T.texts.menu}\nНезавершённая практика сохранена.`,[...menuRows(page),[b('Продолжить практику','cont'),...(t.dlg.step==='waiting_run'?[]:[b('Сбросить практику','drs')])]]);
+    }
     const saved=t.dlg.navigation.kind==='assessment'?t.dlg.navigation:NONE;
     await this.go(t,'menu',{},{sessionId:null,previewId:null,roleplayId:null},saved);
     await this.say(t,prefix?`${prefix}\n\n${T.texts.menu}`:T.texts.menu,[...menuRows(page),...(saved.kind==='assessment'?[[b('Продолжить тест','ast'),b('Сбросить тест','asr')]]:[])]);
@@ -177,6 +180,9 @@ export class Flows {
     pick:(t,arg)=>{const d=t.dlg.draft;const mode=arg as Mode;if(!ORDER[mode])return this.say(t,T.texts.stale);
       return this.compose(t,mode==='understand'?{mode,...(d.message?{message:d.message}:{})}:{mode,...(d.draft?{draft:d.draft}:{})},true);},
     exs:(t,id)=>this.pickExample(t,id),
+    cont:t=>this.resumePractice(t),
+    drs:t=>this.say(t,'Сбросить незавершённую практику? Сохранённые разборы останутся в истории.',[[b('Да, сбросить практику','drx'),b('Продолжить практику','cont')]]),
+    drx:async t=>{await this.reset(t);return this.menu(t,'Незавершённая практика сброшена.');},
     ast:t=>this.resumeAssessment(t),
     asr:t=>t.dlg.navigation.kind==='assessment'?this.say(t,'Сбросить сохранённые ответы теста? Это отдельное действие.',[[b('Да, сбросить тест','asx'),b('Нет, продолжить','ast')]]):this.say(t,T.texts.stale),
     asx:async t=>{if(t.dlg.navigation.kind!=='assessment')return this.say(t,T.texts.stale);t.dlg=await this.domain.resetDialogue(t.ctx,{expectedRevision:t.dlg.revision,confirmation:'DISCARD_UNFINISHED_ASSESSMENT'},this.key(t,'discard_assessment'));return this.menu(t,'Ответы теста сброшены.');},
@@ -214,8 +220,8 @@ export class Flows {
     rp:(t,sid)=>this.withSession(t,sid,()=>this.go(t,'roleplay',{},{sessionId:sid,previewId:null,roleplayId:null}).then(()=>this.say(t,'Каким будет собеседник? Реакции будут зависеть и от уровня, и от твоих ответов. Три твоих ответа, закончить можно раньше.',[LEVELS.map(l=>b(T.difficultyLabels[l],'lv',l)),[toMenu]]))),
     lv:(t,arg)=>{const sid=t.dlg.sessionId;if(!sid||!LEVELS.includes(arg as typeof LEVELS[number]))return this.say(t,T.texts.stale);
       return this.withSession(t,sid,s=>this.previewFor(t,{kind:'roleplay_start',sessionId:sid,expectedRevision:s.revision,difficulty:arg as typeof LEVELS[number]}));},
-    fin:t=>{const sid=t.dlg.sessionId,rid=t.dlg.roleplayId;if(t.dlg.step!=='roleplay'||!sid||!rid)return this.say(t,T.texts.stale,menuRows());
-      return this.withSession(t,sid,s=>this.previewFor(t,{kind:'roleplay_feedback',roleplayId:rid,expectedRevision:s.revision}));},
+    fin:async t=>{const sid=t.dlg.sessionId,rid=t.dlg.roleplayId;if(t.dlg.step!=='roleplay'||!sid||!rid)return this.say(t,T.texts.stale,menuRows());
+      const role=await this.domain.roleplay(t.ctx,{id:rid});return this.previewFor(t,{kind:'roleplay_feedback',roleplayId:rid,expectedRevision:role.revision});},
     rc:(t,sid)=>this.continueRoleplay(t,sid),
     cl:(t,runId)=>this.withRun(t,runId,run=>run.kind==='analysis'&&run.status==='succeeded'?this.say(t,T.clarify(run.output),[...(run.sessionId?[[f('Ещё варианты вопроса','cq',run.sessionId)]]:[]),[toMenu]]):this.say(t,T.texts.notFound)),
     pw:(t,runId,n)=>this.withRun(t,runId,run=>(run.kind==='reply_feedback'||run.kind==='before_send')&&run.status==='succeeded'?this.say(t,T.phraseDetail(run.output,n)??T.texts.notFound):this.say(t,T.texts.notFound)),
@@ -429,6 +435,23 @@ export class Flows {
 
   // ---------- menu
   /** A saved unfinished test is never discarded silently by another scenario: continue it or reset it explicitly. */
+  private async resumePractice(t:Turn):Promise<unknown> {
+    const d=t.dlg;
+    if(d.navigation.kind==='assessment')return this.resumeAssessment(t);
+    if(d.navigation.kind==='preview_field')return this.say(t,'Продолжаем правку выбранного поля. Пришли новый текст. До подтверждения модель ничего не получит.',[[toMenu]]);
+    if(d.navigation.kind==='thread_turn')return this.say(t,'Продолжаем реплику выбранного говорящего. Пришли текст реплики.',[[toMenu]]);
+    if(d.step==='preview'&&d.previewId)return this.showPreview(t,await this.domain.preview(t.ctx,{id:d.previewId}));
+    if(d.step==='compose'){
+      if(!d.draft.mode&&d.sessionId)return this.say(t,'Продолжаем черновик ответа. Пришли свой вариант одним сообщением.',[[toMenu]]);
+      return this.compose(t,d.draft);
+    }
+    if(d.step==='guess')return this.toGuess(t,d.draft);
+    if(d.step==='roleplay'&&d.sessionId)return d.roleplayId?this.continueRoleplay(t,d.sessionId):this.say(t,'Выбери собеседника.',[LEVELS.map(l=>b(T.difficultyLabels[l],'lv',l)),[toMenu]]);
+    if(d.step==='card'&&d.navigation.kind==='card'){const card=await this.domain.card(t.ctx,{id:d.navigation.cardId});return this.say(t,T.card(card)+(d.draft.draft?'\n\nСохранённая попытка:\n'+d.draft.draft:'')+'\n\nНапиши свою попытку одним сообщением.',[[toMenu]]);}
+    if(d.step==='exercise'&&d.sessionId){const s=await this.domain.session(t.ctx,{id:d.sessionId});const run=s.runs.items.find(r=>r.kind==='exercise'&&r.status==='succeeded'&&r.revision===s.revision);if(run&&run.kind==='exercise'&&run.status==='succeeded')return this.say(t,T.exercise(run.output),[[toMenu]]);return this.openSession(t,d.sessionId);}
+    if(d.step==='waiting_run')return this.say(t,'Запрос уже принят. Результат придёт сюда; повторно запускать его не нужно.',[[f('История','m','h'),toMenu]]);
+    return this.menu(t);
+  }
   private assessmentPending(t:Turn) {
     return this.say(t,'У тебя есть незавершённый тест до/после — ответы сохранены. Сначала продолжи его или сбрось (сброс нужно подтвердить).',[[b('Продолжить тест','ast'),b('Сбросить тест','asr')]]);
   }
@@ -642,14 +665,16 @@ export class Flows {
     const sid=t.dlg.sessionId,rid=t.dlg.roleplayId;
     if(!sid||!rid)return this.say(t,'Сначала выбери, каким будет собеседник.');
     if(text.length>T.limits.text)return this.say(t,T.tooLong(T.limits.text,text.length));
-    const s=await this.domain.session(t.ctx,{id:sid});
-    return this.previewFor(t,{kind:'roleplay_turn',roleplayId:rid,expectedRevision:s.revision,content:text});
+    const role=await this.domain.roleplay(t.ctx,{id:rid});
+    return this.previewFor(t,{kind:'roleplay_turn',roleplayId:rid,expectedRevision:role.revision,content:text});
   }
   private async continueRoleplay(t:Turn,sid:string) {
     const page=await this.domain.roleplays(t.ctx,{sessionId:sid,limit:5});
     const role=page.items.find(r=>r.status==='active'),last=role?.messages.filter(x=>x.role==='assistant').at(-1);
     if(!role||!last)return this.say(t,'Активного разговора нет.',[[f('Начать тренировку','rp',sid),toMenu]]);
-    await this.go(t,'roleplay',{},{sessionId:sid,previewId:null,roleplayId:role.id});
+    const saved=t.dlg.step==='roleplay'&&t.dlg.roleplayId===role.id?t.dlg.draft:{};
+    await this.go(t,'roleplay',saved,{sessionId:sid,previewId:null,roleplayId:role.id});
+    if(saved.draft)await this.say(t,'Сохранённая попытка:\n'+saved.draft);
     return this.say(t,`Уровень: ${T.difficultyLabels[role.difficulty]}\n\n${T.roleplayMessage(last.content,role.turnCount)}`,role.turnCount>0?[[b(`Завершить (${role.turnCount}/3)`,'fin')]]:[]);
   }
   private async withSession(t:Turn,sid:string,work:(s:Awaited<ReturnType<ProductFacade['session']>>)=>Promise<unknown>) {return work(await this.domain.session(t.ctx,{id:sid}));}
@@ -808,7 +833,7 @@ export class Flows {
         const p=await this.domain.preview(t.ctx,{id:run.previewId}).catch(error=>{if(escalates(error))throw error;return null;});
         return this.say(t,T.analysis(run.output,new Map(p?.fields.map(x=>[x.id,x.label])??[])),this.resultRows(run));
       }
-      case 'reply_feedback':case 'before_send':await toMenuStep();return this.say(t,T.draftFeedback(run.output),this.resultRows(run));
+      case 'reply_feedback':case 'before_send':{await toMenuStep();const p=await this.domain.preview(t.ctx,{id:run.previewId}).catch(error=>{if(escalates(error))throw error;return null;});const original=p?.fields.find(f=>(f.label==='draft'||f.label==='session.draft'))?.value;return this.say(t,T.draftFeedback(run.output,original),this.resultRows(run));}
       case 'reply_examples':await toMenuStep();return this.say(t,`Примеры под разные цели:\n\n${T.options(run.output)}`,this.resultRows(run));
       case 'say_direct':await toMenuStep();return this.say(t,T.direct(run.output),[this.resultRows(run)[0]!,[f('Новая фраза','m','d'),toMenu]]);
       case 'clarify':await toMenuStep();return this.say(t,T.clarifyRun(run.output),this.resultRows(run));

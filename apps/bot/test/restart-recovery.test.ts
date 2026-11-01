@@ -177,3 +177,13 @@ test('unfinished test is not destroyed by another scenario: the user is asked to
   await h.click('Сбросить тест');await h.click('Да, сбросить тест');
   await h.message('/menu');await h.click('Понять сообщение');assert.match(h.lastText(),/Пришли сообщение/);
 });
+
+
+test('final menu preserves composer and restart continues from the saved field; reset is separate',async()=>{
+  const h=new Harness();await h.register();await h.message('/menu');await h.click('Понять сообщение');await h.message('Ок, завтра.');
+  await h.message('/menu');assert.ok(h.last().buttons.some(b=>b.text==='Продолжить практику'));
+  const restarted=new Harness(h.domain);await restarted.callback(h.button('Продолжить практику'));assert.match(restarted.lastText(),/Кто|кто/);
+  await restarted.message('Коллега');await restarted.message('/menu');await restarted.click('Сбросить практику');
+  assert.ok(restarted.last().buttons.some(b=>b.text==='Да, сбросить практику'));
+  await restarted.click('Продолжить практику');assert.match(restarted.lastText(),/Сфера|сфера|сфере/);
+});

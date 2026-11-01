@@ -33,7 +33,7 @@ try{
     if(typeof applied.prompt!=='string'||/<think>\s*$/i.test(applied.prompt))throw new Error();
     const tokens=await json('/tokenize',{content:applied.prompt,add_special:false});
     const maxTokens=OutputTokenLimits[sample.kind];if(!Array.isArray(tokens.tokens)||tokens.tokens.length+maxTokens+128>4096)throw new Error();
-    const started=performance.now(),response=await fetch(base+'/chat/completions',{method:'POST',headers,signal:AbortSignal.timeout(timeout),body:JSON.stringify({model,messages,temperature:0,max_tokens:maxTokens,reasoning_effort:'none',stream:true,stream_options:{include_usage:true},response_format:{type:'json_schema',schema}})});
+    const started=performance.now(),response=await fetch(base+'/chat/completions',{method:'POST',headers,signal:AbortSignal.timeout(timeout),body:JSON.stringify({model,messages,temperature:0,max_tokens:maxTokens,reasoning_effort:'none',stream:true,stream_options:{include_usage:true},response_format:{type:'json_schema',json_schema:{name:sample.kind,strict:true,schema}}})});
     if(!response.ok||!response.body)throw new Error();
     let content='',buffer='',ttft=null,finish=null,reasoning=false,usage=null;
     const decoder=new TextDecoder();

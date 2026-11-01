@@ -1,7 +1,8 @@
-import {useState} from 'react';
+import {useSavedAttempt} from '../../lib/useSavedAttempt';
+import {useEffect,useState} from 'react';
 import type {z} from 'zod';
 import type {AssessmentForm,AssessmentResult} from '@between/contracts/product';
-import {Link,navigate} from '../../app/router';
+import {Link,navigate,useLocation} from '../../app/router';
 import {Button,Loading,Notice,TextArea} from '../../components/ui';
 import {Modal} from '../../components/Modal';
 import {api,errorText,isApiError,newKey} from '../../lib/api';
@@ -30,7 +31,9 @@ function Daily() {
 
 function Cards() {
   const list=useAsync(signal=>api('cards',{limit:50},{signal}),[]);
-  const [openId,setOpen]=useState<string|null>(null);
+  const {search}=useLocation();
+  const [openId,setOpen]=useState<string|null>(()=>new URLSearchParams(search).get('card'));
+  useEffect(()=>setOpen(new URLSearchParams(search).get('card')),[search]);
   return (
     <section className="card" aria-label="Карточки">
       <h2>Карточки</h2>
@@ -43,13 +46,8 @@ function Cards() {
 }
 function CardDetail({id,onDone}:{id:string;onDone():void}) {
   const c=useAsync(signal=>api('card',{id},{signal}),[id]);
-  const [answer,setAnswer]=useState('');const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
-  const [started,setStarted]=useState(false);
-  // The started task (card id + content version, no text) is saved in the shared dialogue, so the bot can continue it.
-  const markStarted=async()=>{
-    if(started||!c.data)return;setStarted(true);
-    try{const d=await api('dialogue',{});await saveDialogue(d,{step:'card',navigation:{kind:'card',cardId:c.data.id,contentVersion:c.data.contentVersion}});}catch{/* best effort: the attempt itself is still sent through preview */}
-  };
+  const saved=useSavedAttempt({step:'card',cardId:id,contentVersion:c.data?.contentVersion??''});
+  const answer=saved.text,setAnswer=saved.change;const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
   if(!c.data)return c.loading?<Loading label="Открываем"/>:<Notice tone="error">{errorText(c.error)}</Notice>;
   const card=c.data;
   const complete=async()=>{setBusy('done');setError(null);try{await api('completeCard',{id:card.id,contentVersion:card.contentVersion},{key:newKey()});recordStage('card_completed');c.reload();onDone();}catch(e){setError(errorText(e));}finally{setBusy(null);}};
@@ -57,7 +55,7 @@ function CardDetail({id,onDone}:{id:string;onDone():void}) {
   return (
     <div className="mark-detail">
       <p>{card.theory}</p><p><strong>Пример:</strong></p><p className="message">{card.example}</p><p><strong>Попробуйте:</strong> {card.practice}</p>
-      <TextArea label="Ваша попытка" value={answer} maxLength={3000} onFocus={()=>void markStarted()} onChange={e=>setAnswer(e.target.value)}/>
+      <TextArea label="Ваша попытка" value={answer} maxLength={3000} onChange={e=>setAnswer(e.target.value)}/><p className="small" role="status">{saved.status}</p>
       <div className="actions"><Button busy={busy==='try'} disabled={!answer.trim()} onClick={()=>void tryIt()}>Получить отзыв</Button>{!card.completed&&<Button variant="secondary" busy={busy==='done'} onClick={()=>void complete()}>Отметить пройденной</Button>}</div>
       {error&&<Notice tone="error">{error}</Notice>}
     </div>
@@ -65,6 +63,7 @@ function CardDetail({id,onDone}:{id:string;onDone():void}) {
 }
 
 function Assessment() {
+  const {search}=useLocation();
   const [kind,setKind]=useState<'baseline'|'followup'|null>(null);
   const [form,setForm]=useState<Form|null>(null);const [answers,setAnswers]=useState<Record<string,string>>({});
   const [dialogue,setDialogue]=useState<Dialogue|null>(null);
@@ -81,10 +80,11 @@ function Assessment() {
       const saved=nav.kind==='assessment'&&nav.assessmentId===f.id&&nav.contentVersion===f.contentVersion?Object.fromEntries(nav.answers.map(x=>[x.questionId,x.choiceId])):{};
       setForm(f);setAnswers(saved);setDialogue(d);
     }catch(e){setForm(null);setError(isApiError(e,'ASSESSMENT_NOT_DUE')?'Повторный тест откроется через 7 дней после входного.':errorText(e));}finally{setBusy(false);}};
+  useEffect(()=>{const k=new URLSearchParams(search).get('assessment');if(k==='baseline'||k==='followup')void open(k);},[search]);
   const choose=async(taskId:string,choiceId:string)=>{
-    if(!form||!dialogue)return;const next={...answers,[taskId]:choiceId};setAnswers(next);setError(null);
+    if(!form||!dialogue||busy)return;setBusy(true);const next={...answers,[taskId]:choiceId};setAnswers(next);setError(null);
     try{setDialogue(await saveDialogue(dialogue,{step:'assessment',navigation:{kind:'assessment',assessmentId:form.id,contentVersion:form.contentVersion,assessmentKind:form.kind,answers:ordered(form,next)}}));}
-    catch(e){setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново, чтобы увидеть сохранённые.':`Ответ не сохранился: ${errorText(e)}`);}
+    catch(e){setAnswers(answers);setError(isApiError(e,'REVISION_CONFLICT')?'Ответы изменились в боте или другом окне. Откройте тест заново, чтобы увидеть сохранённые.':`Ответ не сохранился: ${errorText(e)}`);}finally{setBusy(false);}
   };
   const submit=async()=>{if(!form||!dialogue)return;setBusy(true);setError(null);
     try{setResult(await api('submitAssessment',{id:form.id,contentVersion:form.contentVersion,expectedDialogueRevision:dialogue.revision,answers:ordered(form,answers)},{key}));recordStage('assessment_completed');setForm(null);

@@ -81,9 +81,9 @@ export const clarify=(a:I<typeof AnalysisV2>)=>`Нейтральный уточ�
 
 export const options=(items:I<typeof FourGoals>)=>items.map(o=>`${goalLabels[o.goal]}:\n«${o.text}»\n${o.explanation}`).join('\n\n');
 
-export function draftFeedback(f:I<typeof DraftFeedback>) {
+export function draftFeedback(f:I<typeof DraftFeedback>,original?:string) {
   const phrases=f.phrases.map((p,n)=>`${n+1}. ${toneLabels[p.tone]}\n«${p.quote}»\nКак может прозвучать: ${p.why}\nВозможная замена: ${p.softer}`).join('\n\n');
-  return [f.strengths.length?`Сильные стороны черновика:\n${list(f.strengths)}`:'',phrases?`Фразы (это возможное восприятие, не оценка тебя):\n\n${phrases}`:'',`Вариант доработки:\n«${f.revisedReply}»`,`Примеры под разные цели:\n\n${options(f.options)}`].filter(Boolean).join('\n\n');
+  return [original?`До — подтверждённый черновик:\n«${original}»`:'',f.strengths.length?`Сильные стороны черновика:\n${list(f.strengths)}`:'',phrases?`Фразы (это возможное восприятие, не оценка тебя):\n\n${phrases}`:'',`После — вариант доработки:\n«${f.revisedReply}»`,f.phrases.length?`Что изменено:\n${f.phrases.slice(0,3).map(p=>`• «${p.quote}» → «${p.softer}»: ${p.why}`).join('\n')}`:'',`Примеры под разные цели:\n\n${options(f.options)}`].filter(Boolean).join('\n\n');
 }
 export const phraseDetail=(f:I<typeof DraftFeedback>,n:number)=>{const p=f.phrases[n];return p?`${n+1}. ${toneLabels[p.tone]}\n«${p.quote}»\n\nПочему: ${p.why}\n\nВариант мягче: «${p.softer}»`:null;};
 

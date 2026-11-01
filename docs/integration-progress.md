@@ -1,4 +1,63 @@
-# Этап 4 · восстановление SSH и подготовка публикации
+# Этап 4 · test app развёрнут, HTTPS и пользовательский checkpoint ожидаются
+
+## Фактический deploy
+
+Облако **gg-ubuntu-01**, SSH `ggadmin@109.194.123.17:2201`; ключ этого ПК работает. Docker29.1.3/Compose2.40.3 доступны ggadmin. VM фактически показывает1642MiB RAM и30GBdisk; это не доказательство достаточности для нагрузки. Маршруты/firewall организаторов не менялись.
+
+Первоначально развёрнут **5292e5fd0f6d5eb58c35f1001d48b1061658fe63**. При проверке настоящего контейнера найден обязательный к исправлению дефект: `/`→500 при `/index.html`, `/auth/login` и health→200. Index существовал и читался uid1000; причина —directory root при `@fastify/static index:false`. Это основание необходимой смены SHA, не обновление по желанию.
+
+**Текущий runtime SHA:291507e20d4b8f5df38f055df870bf73cecb5f2e**, ветка `fix/stage4-static-root`. Минимальный fix: явный GET `/`→sendFile(index.html), HEAD предоставляет Fastify. Контракт/модель/миграции не изменены. Новый regression GET/HEAD/query воспроизвёл500 до fix; после fix реальные HTTP/auth/CSRF/ownership+lifecycle4/4, lint/API types и13/13 Playwright PASS. Образ собран на ПК из git archive именно этого SHA; VM только загружает образ.
+
+Image **between-stage4:291507e**, digest **sha256:e1fd1bed0ae1d87b7533fa25be81c4065d34406e8e2908e1a74cbe7dcd9f100a**. Архив проверен одинаковым SHA-256 на ПК/VM. Старый5292e5f image сохранён для rollback. PR/main/remote refs не менялись.
+
+| Проверка | Результат на VM |
+|---|---|
+| Новый закрытый env | `~/.config/between-lines/test.env`,0600; старые env не перезаписаны; новые независимые DB/email/session/link secrets; model key из server-local0600endpoint.key |
+| Test token/SMTP | Владелец заполнил непосредственно на VM; getMe подтвердил **@test_empather_bot**, webhook отсутствует. Основной token не использован. SMTP-письма/AUTH не повторялись; прежние235/250 не выданы за новый cloud email workflow |
+| Cloud→Gemma | Direct Tailscale100.72.198.119→100.95.63.87, ping186ms (одна диагностическая точка, не p50/p95); `/v1/models` alias **Gemma-3-4B-IT-Q4_K_M**; `/props` context4096/template; настоящий LocalProductModel.describe из app-контейнера known=true |
+| Model BASE_URL | **http://100.95.63.87:8080/v1**, соответствует существующему адаптеру; ключ не печатался, новых hosted inference нет |
+| Изоляция DB | Новые project **between-test-5292**, DB **between_stage4_test_5292**, role between_test, volume **between_test_5292_pgdata**; до создания совпадающий volume отсутствовал; PostgreSQL17.6, внешнего port binding нет |
+| Миграции | PASS,11миграций на новой test DB; реальный DATABASE_URL старого окружения не использовался |
+| HTTP | После fix GET/HEAD `/`, `/index.html`, `/auth/login`, `/api/health/ready`→200; anonymous auth false, cookie Secure/HttpOnly |
+| Полный health | DB/HTTP/polling/workers/scheduler=true. Первоначальная проверка сразу после startup была false до первого25s long-poll; повтор после завершения первого poll PASS, guard не отключён |
+| Фактический VM port | **0.0.0.0:8000 → app:3000**, один app/poller; DB только внутри Docker network |
+| RAM | Одно idle наблюдение: app69.46MiB, DB47.09MiB; не нагрузочный замер/не сумма всей ОС |
+| Пользовательский результат/restart | На последнем снимке accounts/sessions/runs=0;11schema records сохранились после замены app. Это не проверка сохранённой истории/результата; ждать синтетический пользовательский run, затем перезапускать только test app |
+
+Автопроверка отклонила автоматическую передачу локальных SMTP credentials на сервер. Передача не выполнялась; безопасный вариант выполнен владельцем —прямой ввод в private cloud test.env. Ни токены, ни email, ни коды/переписки/model outputs не печатались.
+
+## Точные команды эксплуатации и публикации
+
+Release-каталог на VM: `/home/ggadmin/between-test-5292`. Реальная конфигурация `compose.test.yaml`; её копия без секретов сохранена в [deploy/qqcloud-test.compose.yaml](../deploy/qqcloud-test.compose.yaml). Это test app+DB за HTTPS площадки; Caddy80/443 на VM не запускался. TRUSTED_PROXY_IPS пуст, произвольные forwarded headers не доверены.
+
+Для последующих команд обязательно учитывать **release.env**, чтобы не откатиться на исходный APP_IMAGE5292e5f из private env. Секретный файл не переписывался:
+
+```bash
+cd /home/ggadmin/between-test-5292
+dc() { docker compose --env-file /home/ggadmin/.config/between-lines/test.env --env-file ./release.env -f ./compose.test.yaml "$@"; }
+dc ps
+dc exec -T app node scripts/application-health.mjs
+# Только после завершения пользовательского run и фиксации проверки сохранности:
+# dc restart app
+```
+
+`release.env` содержит только override image=between-stage4:291507e; `source-sha.txt` фиксирует полный291507e. Источник частного model key не менялся.
+
+**Владелец отправляет @gg_domains_bot точную команду:**
+
+```text
+/publish 8000
+```
+
+Затем подтверждает кнопкой. PDF организаторов прочитан; HTTPS выдаёт их инфраструктура, сертификат может занять3мин. Целевой origin **https://atlas.gg.qqtech.ru**. До успешного ответа publish и независимого HTTPS запроса сайт **не считается опубликованным**; последняя внешняя попытка дала URLError, подтверждённого HTTPS ещё нет. Команду боту агент не отправлял.
+
+## Следующие обязательные действия
+
+Владелец запрошен через UI: (1) подтвердить успешную `/publish 8000`; (2) пройти `/start` в @test_empather_bot, подтвердить email и разобрать **вымышленную** фразу «Ок, давай обсудим завтра», проверить очищенный preview и подтвердить отправку модели. Код/ответ/приватную web-link в чат не присылать. Диагностическое письмо повторно не отправляется; код регистрации возникает только по действию пользователя в боте.
+
+После сообщения «тестовый анализ сохранён»: проверить succeeded run в отдельной test DB без вывода содержимого; дождаться pending=0; снять технический snapshot IDs/revisions/status без публикации значений; перезапустить только test app; проверить идентичность сохранённых записей и открытие той же истории через bot-issued web login. По необходимости отдельно проверить restart DB с сохранённым volume. До этого live model result/delivery/email workflow/HTTPS/history acceptance не объявлять успешными. Полного27-feature live прогона/нагрузки/backup/restore нет.
+
+## Этап 4 — предыдущая запись подготовки
 
 Целевой deploy SHA остаётся **5292e5fd0f6d5eb58c35f1001d48b1061658fe63**. Последующие commits этой ветки —только отчёт, не новая версия runtime. Повторных писем не отправлялось; SMTP AUTH235/acceptance250 из предыдущего шага остаются действующими результатами без новой проверки.
 

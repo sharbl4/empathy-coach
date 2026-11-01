@@ -1,0 +1,60 @@
+name: between-test-5292
+services:
+  db:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: between_test
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?Set isolated test password}
+      POSTGRES_DB: between_stage4_test_5292
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=2MB, -c, maintenance_work_mem=32MB, -c, max_connections=20, -c, log_statement=none, -c, log_min_error_statement=panic, -c, log_error_verbosity=terse]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U between_test -d between_stage4_test_5292]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 512m
+    cpus: 0.25
+    logging: {driver: none}
+  app:
+    image: ${APP_IMAGE:?Set checked image}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set isolated test database URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Separate test bot required}
+      AI_PROVIDER: local
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:?Set private model /v1 endpoint}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:?Set confirmed alias}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:?Set private endpoint key}
+      AI_TIMEOUT_MS: ${AI_TIMEOUT_MS:-90000}
+      AI_MAX_CONCURRENCY: 1
+      AI_MAX_QUEUE_LENGTH: 4
+      SMTP_HOST: ${SMTP_HOST:?Set SMTP host directly in private env}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:?Set SMTP user directly in private env}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP password directly in private env}
+      SMTP_FROM: ${SMTP_FROM:?Set SMTP sender directly in private env}
+      EMAIL_CODE_SECRET: ${EMAIL_CODE_SECRET:?Set independent secret}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:?Set independent secret}
+      WEB_LINK_SECRET: ${WEB_LINK_SECRET:?Set independent secret}
+      WEB_ORIGIN: https://atlas.gg.qqtech.ru
+      TRUSTED_PROXY_IPS: ''
+      PORT: 3000
+    ports: ["0.0.0.0:8000:3000"]
+    mem_limit: 640m
+    cpus: 0.65
+    pids_limit: 128
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 120s
+    logging: {driver: none}
+volumes:
+  pgdata:
+    name: between_test_5292_pgdata
